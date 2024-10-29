@@ -1,0 +1,26 @@
+node_modules
+archive
+    
+# Output
+.output
+.vercel
+/.svelte-kit
+/build
+/archive
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+service-account-key.json
+
