@@ -42,8 +42,8 @@
 <!-- Navigation bar for switching views -->
 <div class="navbar">
   <a class={activeView === 'staff' ? 'active' : ''} on:click={() => setView('staff')}>Staff</a>
-<!--   <a class={activeView === 'add' ? 'active' : ''} on:click={() => setView('add')}>Add</a>
-  <a class={activeView === 'import' ? 'active' : ''} on:click={() => setView('import')}>Import</a> -->
+  <a class={activeView === 'add' ? 'active' : ''} on:click={() => setView('add')}>Add</a>
+ <!--  <a class={activeView === 'import' ? 'active' : ''} on:click={() => setView('import')}>Import</a>  -->
   <a class={activeView === 'exclusion' ? 'active' : ''} on:click={() => setView('exclusion')}>Exclusion</a>
 </div>
 
@@ -51,9 +51,9 @@
 <div class="content">
   {#if activeView === 'staff'}
     <StaffList {organizationId} />
-<!--   {:else if activeView === 'add'}
+   {:else if activeView === 'add'}
     <AddStaff />
-  {:else if activeView === 'import'}
+ <!-- {:else if activeView === 'import'}
     <ImportStaff /> -->
   {:else if activeView === 'exclusion'}
     <Exclusion {organizationId}/>

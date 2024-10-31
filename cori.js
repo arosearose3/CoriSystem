@@ -78,12 +78,12 @@ app.use(passport.session());
 
 // Serialize user
 passport.serializeUser((user, done) => {
-  console.log('Serializing user:', user);
+//  console.log('Serializing user:', user);
   done(null, user);
 });
 
 passport.deserializeUser((user, done) => {
-  console.log('Deserializing user:', user);
+ // console.log('Deserializing user:', user);
   done(null, user);
 });
 
@@ -116,7 +116,7 @@ app.get(`${BASE_PATH}/auth/facebook/callback`,
   passport.authenticate('facebook', { failureRedirect: '/', failureMessage: true }),
   (req, res) => {
     console.log('Session ID in /auth/facebook/callback:', req.sessionID);
-    res.redirect(`${BASE_PATH}`);
+    res.redirect(`${process.env.CLIENT_URL}${BASE_PATH}`);
   }
 );
 

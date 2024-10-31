@@ -294,166 +294,121 @@ export async function service_getAllPractitionerIds() {
 
 // Function to update a practitioner's email based on a code
 export async function service_updatePractitionerEmailFromCode(code, email, namestring) {
-  console.log ("service_updateEmail from Code 1 namestring:", namestring);
-  // Find the practitioner ID associated with the code
+  // Try user code first
   const userCodeEntry = UserCodes.find(entry => entry.code === code);
   if (userCodeEntry) {
-    console.log ("service_updateEmail from Code 2");
-    // code matched a code in the user Codes table (not admin)
-  const practitionerId = userCodeEntry.practitionerId;
-  console.log ("service_updateEmail from Code 3");
-
-  try {
-    // Fetch the current Practitioner resource by ID
-    const accessToken = await getFhirAccessToken();
-    const practitionerUrl = `${FHIR_BASE_URL}/Practitioner/${practitionerId}`;
-    console.log ("service_updateEmail from Code 4");
-    const response = await axios.get(practitionerUrl, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: 'application/fhir+json',
-      },
-    });
-    console.log ("service_updateEmail from Code 5");
-    const practitioner = response.data;
-
-    if (!practitioner) { console.log ("service_updateEmail from Code 6");
-      throw new Error(`Practitioner with ID ${practitionerId} not found.`);
-    }
-
-    // Update the email in the practitioner's telecom field
-    if (!practitioner.telecom) {
-      practitioner.telecom = [];
-    }
-    console.log ("service_updateEmail from Code 7");
-    // Check if there's already an email and update it
-    const emailField = practitioner.telecom.find(contact => contact.system === 'email');
-    if (emailField) {
-      emailField.value = email;
-      console.log ("service_updateEmail from Code 8");
-    } else {
-      // Add a new email entry if it doesn't exist
-      practitioner.telecom.push({
-        system: 'email',
-        value: email,
-        use: 'work'
-      });
-      console.log ("service_updateEmail from Code 9");
-    }
-    // Update the practitioner resource in FHIR
-    await axios.put(practitionerUrl, practitioner, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/fhir+json',
-        Accept: 'application/fhir+json',
-      },
-    });
-    console.log ("service_updateEmail from Code 10");
-    return { message: 'Email updated successfully.' };
+    return handleUserCode(userCodeEntry.practitionerId, email);
   }
-  catch (error) {
-    console.error('Error updating email for practitioner:', error.message);
-    throw new Error(`Failed to update email: ${error.message}`);
-
+  // Try admin code next
+  const adminCodeEntry = findAdminCodeEntry(code);
+  if (adminCodeEntry) {
+    return handleAdminCode(adminCodeEntry.OrganizationId, email, namestring);
   }
-
-  } 
-
-  console.log ("service_updateEmail from Code 11, code:",code);
-
-  const userAdminCodeEntry = findAdminCodeEntry(code);
-  if (userAdminCodeEntry) {
-    console.log ("service_updateEmail from Code 12");
-  // this is an admin code, and the other part fo the UserAdminCodes is an Org ID
-  //  "code": "88pp55bco",
-  //  "OrganizationId": "f3533ea1-3016-49e3-8c88-7911fd4de899"
-  //   the email is in the organization 
-  const orgId = userAdminCodeEntry.OrganizationId;
-
-  console.log ("service_updateEmail from Code 12 userACE:",userAdminCodeEntry.OrganizationId);
-
-  // first see if the practitioner exists, if not, create. 
-  // then see if the PractiionerRole exists, if not create. 
-  // if PR has "orgadmin" keep, else put. 
-  // result - practitioner with correct email is associated with the org through a PractRole with orgadmin priv
-  try {
-    console.log("About to call service_findPractitionerByEmail");
-    var pId = await service_findPractitionerByEmail(email);
-    console.log("Completed service_findPractitionerByEmail, result:", pId);
-    console.log("service_updateEmail from Code 13 userContextname:",  email, namestring);
-  } catch (error) {
-    console.error("Error in service_findPractitionerByEmail:", {
-      message: error.message,
-      stack: error.stack,
-      cause: error.cause
-    });
-    throw error; // Re-throw if needed
+  // Finally, search for practitioner with matching invite code extension
+  const practitioner = await findPractitionerByInviteCode(code);
+  if (practitioner) {
+    await updatePractitionerWithRole(practitioner, adminCodeEntry.OrganizationId,email);
+    return { message: 'Email updated successfully via invite code.' };
   }
+  throw new Error('Invalid code - not found in any valid location');
+ }
 
 
-  if (pId === null) {
-  // make a new practitioner 
-  if (!auth) {
-    throw new Error('Not connected to Google Cloud');
+ // updatePractitioner email, and create PractitionerRole for the org if there isn't one, and patch role. 
+ async function updatePractitionerWithRole(practitioner, organizationId,email) {
+  await updatePractitionerEmail(practitioner, email);
+  // Create provider role for the practitioner
+  // the practitionerRole may have already been created in Add Staff. Check first. 
+
+   const practitionerRole = await service_findExistingPractitionerRole(practitioner, organizationId)
+  
+  if (!practitionerRole) {
+    const practRole = await service_createPractitionerRole(practitioner, organizationId);
   }
-  if (!email || !namestring) {
-    throw new Error('User context must include name and email');
-  }
-  // Get access token
+    await service_patchPractitionerRole(practRole.id, ['provider']);
+ }
+
+ async function handleUserCode(practitionerId, email) {
+  const practitioner = await fetchPractitioner(practitionerId);
+  await updatePractitionerEmail(practitioner, email);
+  return { message: 'Email updated successfully.' };
+}
+
+async function handleAdminCode(orgId, email, namestring) {
+  let practitionerId = await findOrCreatePractitioner(email, namestring);
+  let practRole = await findOrCreatePractitionerRole(practitionerId, orgId);
+  await service_patchPractitionerRole(practRole.id, ['provider', 'orgadmin']);
+  return { message: 'Practitioner, Admin, Roles, and Email updated successfully.' };
+}
+ 
+ async function findPractitionerByInviteCode(code) {
   const accessToken = await getFhirAccessToken();
-  if (!accessToken) {
-    throw new Error('Unable to retrieve access token');
+  // Search practitioners with invite code extension
+  const response = await axios.get(`${FHIR_BASE_URL}/Practitioner`, {
+    params: {
+      _extension: `https://combinebh.org/resources/FHIRResources/InviteCode.html|${code}`
+
+    },
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/fhir+json'
+    }
+  });
+  if (!response.data.entry || response.data.entry.length === 0) {
+    return null;
+  }
+  return response.data.entry[0].resource;
+ }
+ 
+ async function fetchPractitioner(practitionerId) {
+  const accessToken = await getFhirAccessToken();
+  const response = await axios.get(`${FHIR_BASE_URL}/Practitioner/${practitionerId}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/fhir+json',
+    }
+  });
+  return response.data;
+}
+
+async function updatePractitionerEmail(practitioner, email) {
+  if (!practitioner.telecom) {
+    practitioner.telecom = [];
+  }
+  const emailField = practitioner.telecom.find(contact => contact.system === 'email');
+  if (emailField) {
+    emailField.value = email;
+  } else {
+    practitioner.telecom.push({ system: 'email', value: email, use: 'work' });
   }
   
-    console.log ("service_updateEmail from Code 14");
-    let userContext = {email:email, name: namestring};
-    const practitionerResource =  util_createPractitionerResource(userContext);
-    console.log ("service_updateEmail from Code 15");
-
-    console.log('Creating practitioner resource:', JSON.stringify(practitionerResource, null, 2));
-    try {
-      console.log("About to call service_addPractitioner");
-      const r = await service_addPractitioner(practitionerResource);
-      console.log("Immediately after await, got response:", JSON.stringify(r, null, 2));
-      
-      if (!r || !r.id) {
-          throw new Error('Invalid response from service_addPractitioner: ' + JSON.stringify(r));
-      }
-      
-      pId = r.id;
-      console.log("Successfully set pId to:", pId);
-  } catch (error) {
-      console.error("Error in service_addPractitioner flow:", error);
-      throw error;
-  }
-
-
-  } else {
-  // a practitioner already exists with this email
-  // possibly there are more than one with the same email, which is a problem state. 
-    pId = pId[0].id;
+  const accessToken = await getFhirAccessToken();
+  return axios.put(`${FHIR_BASE_URL}/Practitioner/${practitioner.id}`, practitioner, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/fhir+json',
+      Accept: 'application/fhir+json',
     }
+  });
+}
 
-  // at this point the Practitioner is either found or created. 
-  // no check for a PractitionerRole for the pId and org Id and if none, make one. 
-
-    let practRole = await service_findExistingPractitionerRole(pId, orgId) 
-    console.log ("service_updateEmail from Code 17");
-
-    if (!practRole) {//make a practitionerRole with pId and orgId 
-      console.log ("service_updateEmail from Code 18 pid:", pId, " orgId:", orgId);
-      practRole = await service_createPractitionerRole(pId, orgId);
-      console.log ("response from create:", practRole, JSON.stringify(practRole));
-      // set roles to provider, referrer, orgadmin
-      let r = await service_patchPractitionerRole(practRole.id, ['provider','orgadmin']);
-      console.log ("service_updateEmail from Code 19");
-      return { message: 'Practitioner, Admin, Roles, and Email updated successfully.' };
-    } else {
-      let r2 = await  service_patchPractitionerRole(practRole.id, ['provider','orgadmin'])
-      console.log ("service_updateEmail from Code 20");
-      return { message: 'Practitioner, Admin, Roles, and Email updated successfully.' };
-    }
+async function findOrCreatePractitioner(email, namestring) {
+  let existingPractitioner = await service_findPractitionerByEmail(email);
+  if (existingPractitioner) {
+    return existingPractitioner[0].id;
   }
+  
+  const practitionerResource = util_createPractitionerResource({ email, name: namestring });
+  const newPractitioner = await service_addPractitioner(practitionerResource);
+  return newPractitioner.id;
+}
+
+async function findOrCreatePractitionerRole(practitionerId, orgId) {
+  let practRole = await service_findExistingPractitionerRole(practitionerId, orgId);
+  if (!practRole) {
+    practRole = await service_createPractitionerRole(practitionerId, orgId);
+  }
+  return practRole;
 }
   
 
@@ -468,17 +423,78 @@ function findAdminCodeEntry(code) {
 }
 
 
+function generateInviteCode() {
+  const chars = 'abcdefghijkmnopqrstuvwxyz023456789';
+  let code = '';
+  for (let i = 0; i < 9; i++) {
+    code += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return code;
+}
 
 export async function service_addPractitioner(practitionerData) {
   console.log('Starting service_addPractitioner');
+  try {
+    let emailToCheck = practitionerData.telecom?.find(t => t.system === 'email')?.value;
+    if (!emailToCheck) {
+     // throw new Error('Email is required');
+     // it's actually OK to make a Practitioner without an email, this is for the invitecode login flow
+    }
+
+    if (emailToCheck) {
+    const existingPractitioner = await service_findPractitionerByEmail(emailToCheck);
+    if (existingPractitioner) {
+      throw new Error('Practitioner already exists');
+    }
+    } 
+  }catch (err) {
+        throw err;
+    }
+
   
+  try {
   if (!auth) {
       throw new Error('Not connected to Google Cloud');
   }
 
   // Ensure proper FHIR resource type
+  // there is no email in the system for this practitioner, therefor generate InviteCode. 
+  // as an extension object.  
+
+     // Only remove birthDate if undefined
+     if (practitionerData.birthDate === "" || practitionerData.birthDate === undefined) {
+      delete practitionerData.birthDate;
+    }
+ 
+// Handle nested empty values
+if (practitionerData.telecom) {
+  practitionerData.telecom = practitionerData.telecom.filter(t => t.value !== "");
+}
+
+if (practitionerData.identifier) {
+  practitionerData.identifier = practitionerData.identifier.filter(id => id.value !== "");
+}
+
+// Remove top-level empty values
+Object.keys(practitionerData).forEach(key => {
+  if (practitionerData[key] === "" || practitionerData[key] === null) {
+    delete practitionerData[key];
+  }
+});
+
   practitionerData.resourceType = 'Practitioner';
-  console.log('Prepared practitioner data:', JSON.stringify(practitionerData, null, 2));
+
+     // Generate and add invite code extension
+     const inviteCode =  generateInviteCode();
+     if (!practitionerData.extension) {
+       practitionerData.extension = [];
+     }
+     practitionerData.extension.push({
+       url: "https://combinebh.org/resources/FHIRResources/InviteCode.html",
+       valueString: inviteCode
+     });
+
+     console.log('pract/create/Prepared practitioner data:', JSON.stringify(practitionerData, null, 2));
 
   // Get access token
   console.log('Getting access token...');
@@ -488,7 +504,7 @@ export async function service_addPractitioner(practitionerData) {
   }
   console.log('Got access token');
 
-  try {
+  
       const url = `${FHIR_BASE_URL}/Practitioner`;
       console.log('Making POST request to:', url);
       
@@ -511,7 +527,8 @@ export async function service_addPractitioner(practitionerData) {
       console.log('Returning result from service_addPractitioner:', JSON.stringify(result, null, 2));
       return result;
       
-  } catch (error) {
+  } 
+  catch (error) {
       console.error('Error in addPractitioner:', error);
       console.error('Error response data:', error.response?.data);
       throw error;

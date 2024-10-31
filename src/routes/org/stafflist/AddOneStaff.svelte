@@ -218,8 +218,9 @@ async function patchRoles(practitionerId, organizationId) {
       </div>
   
       <div class="form-group">
-        <label for="email">Email:</label>
-        <input id="email" type="email" bind:value={email} >
+        <br>
+        Email address is set when the user logs in.
+        <br>
       </div>
   
       <!-- Role Selection -->

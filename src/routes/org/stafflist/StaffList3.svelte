@@ -399,8 +399,8 @@
                 {#if sortColumn === 'roles'}
                   <span class="sort-indicator" class:desc={sortDirection === 'desc'}></span>
                 {/if}
-          <!--     </th>
-              <th> Invite Code</th> -->
+               </th>
+              <th> Invite Code</th> 
               <th>Remove</th>
             </tr>
           </thead>
@@ -421,7 +421,7 @@
             <td>{practitioner.sms}</td>
             <td>{practitioner.email}</td>
             <td>{practitioner.roles}</td>
-  <!--           <td>{practitioner.inviteCode}</td> -->
+            <td>{practitioner.inviteCode}</td>
             <td>
               <span class="delete-icon" on:click={() => handleDelete(practitioner.id, practitioner.roleId)}>
                 🗑️
