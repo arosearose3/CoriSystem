@@ -67,7 +67,7 @@ router.delete('/deletePractitionerAndPractitionerRoles/:id', async (req, res) =>
   }
 });
 
-router.get('/getCodeByPractitionerId', (req, res) => {
+router.get('/getBatch1CodeByPractitionerId', (req, res) => {
   const { practitionerId } = req.query;
   if (!practitionerId) {
     return res.status(400).json({ error: 'practitionerId is required' });
@@ -75,6 +75,18 @@ router.get('/getCodeByPractitionerId', (req, res) => {
   const found = UserCodes.find(item => item.practitionerId === practitionerId);
   if (!found) {
     return res.status(404).json({ error: 'Practitioner ID not found' });
+  }
+  return res.json({ code: found.code });
+});
+
+router.get('/getBatch1AdminCodeByOrganizationId', (req, res) => {
+  const { orgId } = req.query;
+  if (!orgId) {
+    return res.status(400).json({ error: 'organizationId is required' });
+  }
+  const found = UserAdminCodes.find(item => item.practitionerId === practitionerId);
+  if (!found) {
+    return res.status(404).json({ error: 'Organization ID not found' });
   }
   return res.json({ code: found.code });
 });
@@ -198,6 +210,8 @@ router.get('/findWithEmail', async (req, res) => {
 
 
 router.post('/add', async (req, res) => {
+
+
   try {
     const practitionerResult = await service_addPractitioner(req.body);
     
