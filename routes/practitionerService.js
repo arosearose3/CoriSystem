@@ -294,12 +294,12 @@ export async function service_getAllPractitionerIds() {
 
 // Function to update a practitioner's email based on a code
 export async function service_updatePractitionerEmailFromCode(code, email, namestring) {
-  // Try user code first
+  // Try user code first from Batch 1
   const userCodeEntry = UserCodes.find(entry => entry.code === code);
   if (userCodeEntry) {
     return handleUserCode(userCodeEntry.practitionerId, email);
   }
-  // Try admin code next
+  // Try admin code next from Batch 1
   const adminCodeEntry = findAdminCodeEntry(code);
   if (adminCodeEntry) {
     return handleAdminCode(adminCodeEntry.OrganizationId, email, namestring);
@@ -307,7 +307,7 @@ export async function service_updatePractitionerEmailFromCode(code, email, names
   // Finally, search for practitioner with matching invite code extension
   const practitioner = await findPractitionerByInviteCode(code);
   if (practitioner) {
-    await updatePractitionerWithRole(practitioner, adminCodeEntry.OrganizationId,email);
+    await updatePractitionerWithRole(practitioner, email); //WRONG
     return { message: 'Email updated successfully via invite code.' };
   }
   throw new Error('Invalid code - not found in any valid location');
@@ -315,7 +315,7 @@ export async function service_updatePractitionerEmailFromCode(code, email, names
 
 
  // updatePractitioner email, and create PractitionerRole for the org if there isn't one, and patch role. 
- async function updatePractitionerWithRole(practitioner, organizationId,email) {
+ async function updatePractitionerWithRole(practitioner, email) {
   await updatePractitionerEmail(practitioner, email);
   // Create provider role for the practitioner
   // the practitionerRole may have already been created in Add Staff. Check first. 
@@ -341,25 +341,102 @@ async function handleAdminCode(orgId, email, namestring) {
   return { message: 'Practitioner, Admin, Roles, and Email updated successfully.' };
 }
  
- async function findPractitionerByInviteCode(code) {
-  const accessToken = await getFhirAccessToken();
-  // Search practitioners with invite code extension
-  const response = await axios.get(`${FHIR_BASE_URL}/Practitioner`, {
-    params: {
-      _extension: `https://combinebh.org/resources/FHIRResources/InviteCode.html|${code}`
+async function findPractitionerByInviteCode(code) {
+  console.log('Starting findPractitionerByInviteCode...', { code });
+  
+  try {
+    // Log access token request
+    console.log('Requesting FHIR access token...');
+    const accessToken = await getFhirAccessToken();
+    console.log('Access token obtained successfully');
 
-    },
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: 'application/fhir+json'
+    // Construct the request URL and parameters
+    const url = `${FHIR_BASE_URL}/Practitioner`;
+    const params = {
+      _extension: `https://combinebh.org/resources/FHIRResources/InviteCode.html|${code}`
+    };
+
+    console.log('Making FHIR API request:', {
+      url,
+      params,
+      headers: {
+        Authorization: 'Bearer [REDACTED]',
+        Accept: 'application/fhir+json'
+      }
+    });
+
+    // Make the request
+    const response = await axios.get(url, {
+      params,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/fhir+json'
+      }
+    });
+
+    // Log successful response details
+    console.log('FHIR API response received:', {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+      total: response.data?.total,
+      entryCount: response.data?.entry?.length
+    });
+
+    // Check for empty results
+    if (!response.data.entry || response.data.entry.length === 0) {
+      console.log('No practitioner found with provided invite code:', code);
+      return null;
     }
-  });
-  if (!response.data.entry || response.data.entry.length === 0) {
-    return null;
+
+    // Log found practitioner details (without sensitive information)
+    const practitioner = response.data.entry[0].resource;
+    console.log('Practitioner found:', {
+      id: practitioner.id,
+      resourceType: practitioner.resourceType,
+      hasName: !!practitioner.name,
+      hasIdentifier: !!practitioner.identifier,
+      hasTelecom: !!practitioner.telecom,
+      extensionCount: practitioner.extension?.length
+    });
+
+    return practitioner;
+
+  } catch (error) {
+    // Enhanced error logging
+    console.error('Error in findPractitionerByInviteCode:', {
+      message: error.message,
+      code: error.code,
+      stack: error.stack,
+      // Axios specific error details
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      headers: error.response?.headers,
+      // Request details that caused the error
+      requestURL: error.config?.url,
+      requestMethod: error.config?.method,
+      requestParams: error.config?.params,
+      requestHeaders: {
+        ...error.config?.headers,
+        Authorization: '[REDACTED]' // Don't log the actual token
+      }
+    });
+
+    // If it's a specific FHIR API error, log additional details
+    if (error.response?.data?.issue) {
+      console.error('FHIR API Error Details:', {
+        issues: error.response.data.issue,
+        operationOutcome: error.response.data
+      });
+    }
+
+    // Rethrow with more context
+    throw new Error(`Failed to find practitioner by invite code: ${error.message}`, {
+      cause: error
+    });
   }
-  return response.data.entry[0].resource;
- }
- 
+}
  async function fetchPractitioner(practitionerId) {
   const accessToken = await getFhirAccessToken();
   const response = await axios.get(`${FHIR_BASE_URL}/Practitioner/${practitionerId}`, {

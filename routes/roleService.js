@@ -288,6 +288,8 @@ export async function service_patchPractitionerRole(roleId, roles) {
 
 /**
  * Main service function to update or create PractitionerRole with roles
+ * Takes Practitioner reference and Organization reference, and array of role codes.  
+ * This does not create a new PractitionerRole, just deals with roles. 
  */
 export async function service_updatePractitionerRoles(practitionerRef, organizationRef, roles) {
   if (!practitionerRef || !organizationRef || !Array.isArray(roles)) {

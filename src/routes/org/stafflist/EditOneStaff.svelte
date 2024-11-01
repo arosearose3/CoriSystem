@@ -9,8 +9,8 @@
   
     const dispatch = createEventDispatcher();
   
-    let firstName = practitioner.name.split(' ')[0];
-    let lastName = practitioner.name.split(' ').slice(1).join(' ');
+    let firstName = practitioner.firstName;
+    let lastName = practitioner.lastName;
     let dob = practitioner.birthDate;
     let npi = practitioner.npi;
     let phone = practitioner.sms;
@@ -53,89 +53,234 @@
       selected: currentRoleCodes.includes(role.code)
     }));
   
-  async function handleSubmit() {
+// Helper function to check if a value should be removed
+function shouldRemoveValue(value) {
+  if (value === null || value === undefined || value === '' || value === 'Unknown') {
+    return true;
+  }
+  return false;
+}
+
+// Helper function to clean objects for FHIR compatibility
+function cleanObject(obj) {
+  // If not an object or is null, return as is
+  if (!obj || typeof obj !== 'object') {
+    return obj;
+  }
+
+  // Handle arrays
+  if (Array.isArray(obj)) {
+    return obj
+      .map(item => cleanObject(item))
+      .filter(item => {
+        if (typeof item === 'object') {
+          return Object.keys(item).length > 0;
+        }
+        return !shouldRemoveValue(item);
+      });
+  }
+
+  // Clone the object to avoid modifying the original
+  const cleaned = { ...obj };
+
+  for (const key in cleaned) {
+    // Skip resourceType, id, meta, and extension fields
+    if (['resourceType', 'id', 'meta', 'extension'].includes(key)) {
+      continue;
+    }
+
+    // Handle nested objects including telecom and identifier arrays
+    if (typeof cleaned[key] === 'object') {
+      cleaned[key] = cleanObject(cleaned[key]);
+      
+      // Remove empty objects
+      if (Array.isArray(cleaned[key])) {
+        if (cleaned[key].length === 0) {
+          delete cleaned[key];
+        }
+      } else if (!cleaned[key] || Object.keys(cleaned[key]).length === 0) {
+        delete cleaned[key];
+      }
+    } else {
+      // Handle primitive values
+      if (shouldRemoveValue(cleaned[key])) {
+        delete cleaned[key];
+      }
+    }
+  }
+
+  return cleaned;
+}
+
+// Function to build the name structure
+function buildNameStructure(firstName, lastName) {
+  const name = {
+    use: 'official'
+  };
+
+  if (!shouldRemoveValue(lastName)) {
+    name.family = lastName;
+  }
+
+  if (!shouldRemoveValue(firstName)) {
+    name.given = [firstName];
+  }
+
+  return [name];
+}
+
+// Function to build telecom array
+function buildTelecomArray(email, phone, currentTelecom = []) {
+  const telecom = [];
+  
+  if (!shouldRemoveValue(email)) {
+    telecom.push({ system: 'email', value: email });
+  }
+  
+  if (!shouldRemoveValue(phone)) {
+    telecom.push({ system: 'phone', value: phone });
+  }
+  
+  // Preserve other existing telecom entries that don't have 'Unknown' values
+  if (Array.isArray(currentTelecom)) {
+    currentTelecom
+      .filter(t => 
+        !['email', 'phone'].includes(t.system) && 
+        !shouldRemoveValue(t.value)
+      )
+      .forEach(t => telecom.push(t));
+  }
+  
+  return telecom;
+}
+
+// Function to build identifier array
+function buildIdentifierArray(npi, currentIdentifiers = []) {
+  const identifiers = [];
+  
+  if (!shouldRemoveValue(npi)) {
+    identifiers.push({
+      system: 'http://hl7.org/fhir/sid/us-npi',
+      value: npi
+    });
+  }
+  
+  // Preserve other existing identifiers that don't have 'Unknown' values
+  if (Array.isArray(currentIdentifiers)) {
+    currentIdentifiers
+      .filter(id => 
+        id.system !== 'http://hl7.org/fhir/sid/us-npi' && 
+        !shouldRemoveValue(id.value)
+      )
+      .forEach(id => identifiers.push(id));
+  }
+  
+  return identifiers;
+}
+
+// Function to fetch current practitioner data
+async function fetchCurrentPractitioner(practitionerId) {
+  const response = await fetch(`${base}/api/practitioner/${practitionerId}`);
+  const data = await response.json();
+  
+  if (!response.ok) {
+    throw new Error(`Failed to load current practitioner data: ${data.error || 'Unknown error'}`);
+  }
+  
+  return data;
+}
+
+// Function to update practitioner data
+async function updatePractitioner(practitionerId, updatedData) {
+  console.log('Updating practitioner with data:', JSON.stringify(updatedData));
+  const response = await fetch(`${base}/api/practitioner/update/${practitionerId}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(updatedData)
+  });
+  
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(`Failed to update practitioner: ${result.error || 'Unknown error'}`);
+  }
+  
+  return result;
+}
+
+// Function to update practitioner roles
+async function updatePractitionerRoles(practitionerId, organizationId, selectedRoles, practitionerRoleId) {
+  if (selectedRoles.length === 0) {
+    throw new Error('Please select at least one role.');
+  }
+  
+  const roleData = {
+    id: practitionerRoleId,
+    practitioner: { reference: `Practitioner/${practitionerId}` },
+    organization: { reference: `Organization/${organizationId}` },
+    roles: selectedRoles
+  };
+  
+  const response = await fetch(`${base}/api/role/patchRoles`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(roleData)
+  });
+  
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(`Failed to update practitioner roles: ${result.error || 'Unknown error'}`);
+  }
+  
+  return result;
+}
+
+// Main submit handler
+async function handleSubmit() {
   loading = true;
   errorMessage = '';
   successMessage = '';
 
   try {
-    // Step 1: Fetch the current practitioner data before update
-    const currentPractitionerDataResponse = await fetch(`${base}/api/practitioner/${practitioner.id}`);
-    const currentPractitionerData = await currentPractitionerDataResponse.json();
+    // Step 1: Fetch current data
+    const currentPractitionerData = await fetchCurrentPractitioner(practitioner.id);
     
-    if (!currentPractitionerDataResponse.ok) {
-      throw new Error(`Failed to load current practitioner data: ${currentPractitionerData.error || 'Unknown error'}`);
-    }
-
-    // Step 2: Merge the UI form data into the existing practitioner resource
-    const updatedPractitionerData = {
-      ...currentPractitionerData, // Preserve all current fields
-      name: [
-        {
-          family: lastName,
-          given: [firstName],
-          use: 'official'
-        }
-      ],
-      birthDate: dob || currentPractitionerData.birthDate, // Use existing if dob is unchanged
-      telecom: [
-        ...currentPractitionerData.telecom?.filter(t => !['email', 'phone'].includes(t.system)) || [], // Keep other telecoms
-        { system: 'email', value: email || currentPractitionerData.telecom?.find(t => t.system === 'email')?.value || '' }, // Preserve email if not changed
-        { system: 'phone', value: phone || currentPractitionerData.telecom?.find(t => t.system === 'phone')?.value || '' }  // Preserve phone if not changed
-      ],
-      identifier: [
-        ...currentPractitionerData.identifier?.filter(id => id.system !== 'http://hl7.org/fhir/sid/us-npi') || [], // Preserve other identifiers
-        { system: 'http://hl7.org/fhir/sid/us-npi', value: npi || currentPractitionerData.identifier?.find(id => id.system === 'http://hl7.org/fhir/sid/us-npi')?.value || '' } // Preserve NPI if not changed
-      ]
+    // Step 2: Build updated practitioner data
+    let updatedPractitionerData = {
+      ...currentPractitionerData,  // This preserves extension, meta, etc.
+      name: buildNameStructure(firstName, lastName),
+      telecom: buildTelecomArray(email, phone, currentPractitionerData.telecom),
+      identifier: buildIdentifierArray(npi, currentPractitionerData.identifier)
     };
 
-    // Step 3: Update Practitioner resource
-    const updatePractitionerResponse = await fetch(`${base}/api/practitioner/update/${practitioner.id}`, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(updatedPractitionerData)
-    });
-
-    if (!updatePractitionerResponse.ok) {
-      const result = await updatePractitionerResponse.json();
-      throw new Error(`Failed to update practitioner: ${result.error || 'Unknown error'}`);
+    // Only add birthDate if it's not "Unknown" or empty
+    if (!shouldRemoveValue(dob)) {
+      updatedPractitionerData.birthDate = dob;
     }
-
-    // Step 4: Update PractitionerRole (patch roles)
-    const selectedRoles = roles.filter(role => role.selected).map(role => role.code);
     
-    if (selectedRoles.length === 0) {
-      throw new Error('Please select at least one role.');
-    }
-
-    const organizationId = $user.practitioner.organizationId;
+    // Step 3: Clean the data structure while preserving required fields
+    updatedPractitionerData = cleanObject(updatedPractitionerData);
     
-    const updatedPractitionerRoleData = {
-      practitioner: { reference: `Practitioner/${practitioner.id}` },
-      organization: { reference: `Organization/${organizationId}` },
-      roles: selectedRoles
-    };
-
-    const updateRoleResponse = await fetch(`${base}/api/role/patchRoles`, {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        ...updatedPractitionerRoleData,
-        id: practitionerRoleId // Include the PractitionerRole ID for updating
-      })
-    });
-
-    if (!updateRoleResponse.ok) {
-      const result = await updateRoleResponse.json();
-      throw new Error(`Failed to update practitioner roles: ${result.error || 'Unknown error'}`);
-    }
-
+    // Step 4: Update practitioner
+    await updatePractitioner(practitioner.id, updatedPractitionerData);
+    
+    // Step 5: Update roles
+    const selectedRoles = roles
+      .filter(role => role.selected)
+      .map(role => role.code);
+    
+    await updatePractitionerRoles(
+      practitioner.id,
+      $user.practitioner.organizationId,
+      selectedRoles,
+      practitionerRoleId
+    );
+    
     successMessage = 'Practitioner and roles updated successfully.';
-    dispatch('close', { success: true }); // Add success flag
+    dispatch('close', { success: true });
   } catch (error) {
     console.error('Error updating practitioner:', error);
     errorMessage = error.message || 'An error occurred. Please try again.';

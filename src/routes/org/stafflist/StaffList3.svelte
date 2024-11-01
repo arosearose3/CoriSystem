@@ -4,6 +4,8 @@
     import { base } from '$app/paths'; // Import base path
     import EditOneStaff from './EditOneStaff.svelte';
   
+    import { practitionersStore, practitionersHelper } from '$lib/practitionersStore.js';
+
     let sortColumn = 'name';
     let sortDirection = 'asc';
     let message = '';
@@ -77,20 +79,22 @@
             // Combine all relevant data into a single object
             loadedPractitioners.push({
               lastUpdate: formatLastUpdate(role.meta.lastUpdate),
-              id: practitionerId, // Practitioner ID
-              roleId: practitionerRoleId, // PractitionerRole ID
-              name: practitionerData.name,
+              id: practitionerId,
+              roleId: practitionerRoleId,
+              firstName: practitionerData.firstName,
+              lastName: practitionerData.lastName,
               birthDate: practitionerData.birthDate,
               npi: practitionerData.npi,
               sms: practitionerData.sms,
-              email: practitionerData.email, // Add email field
+              email: practitionerData.email,
               inviteCode: practitionerData.inviteCode,
-              roles: roleNames // Add the roles as a comma-separated string
+              roles: roleNames
             });
           }));
   
           // Assign the newly loaded practitioners to the reactive variable
           practitioners = loadedPractitioners;
+          practitionersHelper.setPractitioners(loadedPractitioners);
         } else {
           message = 'Invalid FHIR PractitionerRole bundle format.';
         }
@@ -105,53 +109,58 @@
      * @param {string} practitionerId - The ID of the practitioner.
      * @returns {Object} - An object containing the practitioner's name, birthDate, NPI, SMS, and email.
      */
-    async function fetchPractitionerDetails(practitionerId) {
-      try {
-        const response = await fetch(`${base}/api/practitioner/${practitionerId}`);
-        const practitioner = await response.json(); // Directly get the practitioner resource
-  
-        // Construct the full name
-        const givenNames = practitioner.name?.[0]?.given?.join(' ') || '';
-        const familyName = practitioner.name?.[0]?.family || 'Unknown';
-        const fullName = `${givenNames} ${familyName}`.trim();
-  
-        // Extract NPI from identifier array
-        const npiIdentifier = practitioner.identifier?.find(id => id.system === 'http://hl7.org/fhir/sid/us-npi');
-        const npi = npiIdentifier ? npiIdentifier.value : 'Unknown';
-  
-        // Extract SMS (phone number) from telecom array
-        const phoneTelecom = practitioner.telecom?.find(t => t.system === 'phone');
-        const sms = phoneTelecom ? phoneTelecom.value : 'Unknown';
-  
-        // Extract email from telecom array
-        const emailTelecom = practitioner.telecom?.find(t => t.system === 'email');
-        const email = emailTelecom ? emailTelecom.value : 'Unknown';
-     
-        // if the Practitioner has no email, no account estableshed yet,fetch the invite code
-        var inviteCode = 'Unknown';
-        console.log ("stafflist3 fullname:",fullName," email:",email );
-        if (email === 'Unknown') {
-           inviteCode = await fetchInviteCode (practitionerId);
-        } else {
-           inviteCode = 'Invited';
-        }
-       
+     async function fetchPractitionerDetails(practitionerId) {
+  try {
+    const response = await fetch(`${base}/api/practitioner/${practitionerId}`);
+    const practitioner = await response.json(); // Directly get the practitioner resource
 
-        return {
-        
-          name: fullName,
-          birthDate: practitioner.birthDate || 'Unknown',
-          npi,
-          sms,
-          email,
-          inviteCode
-        };
-      } catch (error) {
-        console.error(`Error fetching practitioner details for ID ${practitionerId}:`, error);
-        return { name: 'Unknown', birthDate: 'Unknown', npi: 'Unknown', sms: 'Unknown', email: 'Unknown' };
-      }
+    // Construct first and last names
+    const firstName = practitioner.name?.[0]?.given?.join(' ') || 'Unknown';
+    const lastName = practitioner.name?.[0]?.family || 'Unknown';
+
+    // Extract NPI from identifier array
+    const npiIdentifier = practitioner.identifier?.find(id => id.system === 'http://hl7.org/fhir/sid/us-npi');
+    const npi = npiIdentifier ? npiIdentifier.value : 'Unknown';
+
+    // Extract SMS (phone number) from telecom array
+    const phoneTelecom = practitioner.telecom?.find(t => t.system === 'phone');
+    const sms = phoneTelecom ? phoneTelecom.value : 'Unknown';
+
+    // Extract email from telecom array
+    const emailTelecom = practitioner.telecom?.find(t => t.system === 'email');
+    const email = emailTelecom ? emailTelecom.value : 'Unknown';
+ 
+    // if the Practitioner has no email, no account estableshed yet,fetch the invite code
+    var inviteCode = 'Unknown';
+   // console.log("stafflist3:", firstName, lastName, "email:", email); // Fixed console.log
+    if (email === 'Unknown') {
+       inviteCode = await fetchInviteCode(practitionerId);
+    } else {
+       inviteCode = 'Invited';
     }
-  
+
+    return {
+      firstName,
+      lastName,
+      birthDate: practitioner.birthDate || 'Unknown',
+      npi,        // Fixed: directly use npi
+      sms,        // Fixed: directly use sms
+      email,      // Fixed: directly use email
+      inviteCode  // Fixed: directly use inviteCode
+    };
+  } catch (error) {
+    console.error(`Error fetching practitioner details for ID ${practitionerId}:`, error);
+    return { 
+      firstName: 'Unknown', 
+      lastName: 'Unknown',
+      birthDate: 'Unknown', 
+      npi: 'Unknown', 
+      sms: 'Unknown', 
+      email: 'Unknown',
+      inviteCode: 'Unknown'
+    };
+  }
+}
     async function fetchInviteCode(pId) {
     try {
       const response = await fetch(`${base}/api/practitioner/getCodeByPractitionerId?practitionerId=${pId}`);
@@ -364,14 +373,20 @@
     <table>
         <thead>
             <tr>
-              <th on:click={() => sortTable('name')}>
-                Name
-                {#if sortColumn === 'name'}
+              <th on:click={() => sortTable('firstName')}>
+                First Name
+                {#if sortColumn === 'firstName'}
                   <span class="sort-indicator" class:desc={sortDirection === 'desc'}></span>
                 {/if}
               </th>
-              <th on:click={() => sortTable('birthDate')}>
-                Date of Birth
+              <th on:click={() => sortTable('lastName')}>
+                Last Name
+                {#if sortColumn === 'lastName'}
+                  <span class="sort-indicator" class:desc={sortDirection === 'desc'}></span>
+                {/if}
+              </th>
+              <th on:click={() => sortTable('birthDate')}>   <!-- Add this -->
+                DOB
                 {#if sortColumn === 'birthDate'}
                   <span class="sort-indicator" class:desc={sortDirection === 'desc'}></span>
                 {/if}
@@ -409,14 +424,16 @@
         {#each practitioners as practitioner}
           <tr>
             <td>
-              <span 
-                class="practitioner-name" 
-                on:click={() => handlePractitionerClick(practitioner)}
-              >
-                {practitioner.name}
+              <span class="practitioner-name" on:click={() => handlePractitionerClick(practitioner)}>
+                {practitioner.firstName}
               </span>
             </td>
-            <td>{practitioner.birthDate}</td>
+            <td>
+              <span class="practitioner-name" on:click={() => handlePractitionerClick(practitioner)}>
+                {practitioner.lastName}
+              </span>
+            </td>
+            <td>{practitioner.birthDate}</td>  
             <td>{practitioner.npi}</td>
             <td>{practitioner.sms}</td>
             <td>{practitioner.email}</td>
