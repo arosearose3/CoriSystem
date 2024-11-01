@@ -24,6 +24,159 @@ const router = express.Router();
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
 
+// Add this endpoint to practitionerRoutes.js
+
+router.get('/getCodeByPractitionerId', async (req, res) => {
+  const { practitionerId } = req.query;
+  if (!practitionerId) {
+      return res.status(400).json({
+          error: 'Practitioner ID is required'
+      });
+  }
+  try {
+
+    const userCodeEntry = UserCodes.find(entry => entry.practitionerId === practitionerId);
+    if (userCodeEntry) {
+        console.log('Found code in UserCodes array:', userCodeEntry.code);
+        return res.status(200).json({
+            code: userCodeEntry.code,
+            practitionerId,
+            source: 'userCodes'
+        });
+    }
+      // Get access token for FHIR store
+      const accessToken = await getFhirAccessToken();
+      
+      // Construct URL to fetch the Practitioner resource
+      const url = `${FHIR_BASE_URL}/Practitioner/${practitionerId}`;
+
+      // Fetch the Practitioner resource
+      const response = await axios.get(url, {
+          headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: 'application/fhir+json'
+          }
+      });
+
+      const practitioner = await handleBlobResponse(response.data);
+
+      // Find the invite code extension
+      const inviteCodeExtension = practitioner.extension?.find(
+          ext => ext.url === "https://combinebh.org/resources/FHIRResources/InviteCode.html"
+      );
+
+      if (!inviteCodeExtension) {
+          // If no invite code is found, return a 404
+          return res.status(404).json({
+              error: 'No invite code found for this practitioner',
+              practitionerId
+          });
+      }
+
+      // Return the invite code
+      return res.status(200).json({
+          code: inviteCodeExtension.valueString,
+          practitionerId
+      });
+
+  } catch (error) {
+      console.error('Error fetching invite code:', error);
+
+      // Handle specific error cases
+      if (error.response?.status === 404) {
+          return res.status(404).json({
+              error: 'Practitioner not found',
+              practitionerId
+          });
+      }
+
+      if (error.message.includes('access token')) {
+          return res.status(401).json({
+              error: 'Authentication error',
+              details: 'Failed to obtain access token'
+          });
+      }
+
+      // Generic error response
+      return res.status(500).json({
+          error: 'Failed to fetch invite code',
+          details: error.message,
+          practitionerId
+      });
+  }
+});
+
+
+
+
+
+router.patch('/patchPractitioner/:practitionerId', async (req, res) => {
+  if (!auth) {
+    return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });
+  }
+
+  const { practitionerId } = req.params;
+  const { propertyPath, value } = req.body;
+
+  if (!practitionerId || !propertyPath || value === undefined) {
+    return res.status(400).json({ error: 'Practitioner ID, property path, and value are required.' });
+  }
+
+  try {
+    console.log(`Starting PATCH operation for Practitioner ID: ${practitionerId}`);
+
+    // Step 1: Retrieve the existing Practitioner resource
+    console.log('Retrieving existing Practitioner resource...');
+    const practitioner = await service_getPractitionerById(practitionerId);
+    if (!practitioner) {
+      console.log(`Practitioner with ID ${practitionerId} not found.`);
+      return res.status(404).json({ error: `Practitioner with ID ${practitionerId} not found.` });
+    }
+    console.log('Practitioner resource retrieved successfully.');
+
+    // Step 2: Check if the property exists in the Practitioner resource
+    console.log(`Checking existence of property path: ${propertyPath}`);
+    const propertyExists = propertyPath.split('.').reduce((obj, key) => obj && obj[key], practitioner) !== undefined;
+
+    // Step 3: Prepare the PATCH operation based on property existence
+    const patchOperation = propertyExists
+      ? { op: 'replace', path: `/${propertyPath.replace(/\./g, '/')}`, value } // Use replace if property exists
+      : { op: 'add', path: `/${propertyPath.replace(/\./g, '/')}`, value };    // Use add if property doesn't exist
+
+    console.log(`Preparing PATCH request with operation: ${patchOperation.op} on path: ${patchOperation.path}`);
+    const patchUrl = `${FHIR_BASE_URL}/Practitioner/${practitionerId}`;
+    const accessToken = await getFhirAccessToken();
+
+    // Step 4: Send the PATCH request
+    console.log(`Sending PATCH request to URL: ${patchUrl}`);
+    const response = await axios.patch(patchUrl, [patchOperation], {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json-patch+json',  // JSON Patch content type
+        Accept: 'application/fhir+json',  // FHIR-compliant response type
+      },
+    });
+
+    // Step 5: Handle the response and return the updated resource
+    console.log('PATCH request successful. Handling response data...');
+    const updatedPractitioner = await handleBlobResponse(response.data);
+    console.log('Practitioner patched successfully.');
+    res.status(200).json({ message: 'Practitioner patched successfully', data: updatedPractitioner });
+
+  } catch (error) {
+    console.error('Error in patchPractitioner route:', error.message || error.response?.data);
+
+    // Specific logging for Google API errors
+    if (error.response && error.response.data) {
+      console.error('Google API Error Response:', JSON.stringify(error.response.data, null, 2));
+    }
+
+    res.status(500).json({ error: 'Failed to patch Practitioner', details: error.message });
+  }
+});
+
+
+
 router.delete('/deletePractitionerAndPractitionerRoles/:id', async (req, res) => {
   console.log("Starting deletion process for practitioner:", req.params.id);
   
@@ -137,7 +290,8 @@ router.post('/updateEmailFromCode', async (req, res) => {
   }
 });
 
-// Update an existing Practitioner
+// Update an existing Practitioner. CAUTION will clobber existing data if Resource is partial, 
+// usually copy the old Pract Resource, append or modify, and then pass to here. 
 router.put('/update/:practitionerId', async (req, res) => {
   if (!auth) {
     return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });

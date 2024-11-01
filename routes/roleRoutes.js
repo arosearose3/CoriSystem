@@ -8,6 +8,9 @@ import {service_getPractitionerRoles} from './roleService.js';
 import {service_createPractitionerRole} from './roleService.js';
 import {service_updatePractitionerRoles} from './roleService.js';
 import {service_deletePractitionerRole} from './roleService.js';
+import {service_addPractitioner} from './practitionerService.js';
+import {service_patchPractitionerRole} from './roleService.js';
+
 
 
 import { BASE_PATH } from '../serverutils.js'; // Adjust the path as necessary
@@ -17,8 +20,122 @@ const router = express.Router();
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
 
-//find all PractionerRole resources for a single Org
+function filterEmptyValues(object) {
+  return Object.fromEntries(
+    Object.entries(object)
+      .filter(([_, value]) => value && value !== 'Unknown' && value !== '')
+  );
+}
 
+router.post('/createProvider', async (req, res) => {
+  if (!auth) {
+      return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });
+  }
+
+  const { organizationId, name, birthDate, identifier, telecom } = req.body;
+
+  // Validate required fields
+  if (!organizationId || !name || !name[0]?.family || !name[0]?.given[0]) {
+      return res.status(400).json({ error: 'Organization ID and complete name information are required.' });
+  }
+
+  try {
+      // Prepare practitioner data according to service requirements
+      const practitionerData = {
+          name: name.map(n => ({
+              given: n.given,
+              family: n.family,
+              use: n.use
+          })),
+          birthDate,
+          identifier,
+          telecom
+      };
+
+      // Step 1: Create the Practitioner
+      console.log('Creating practitioner with data:', JSON.stringify(practitionerData, null, 2));
+      const practitionerResult = await service_addPractitioner(practitionerData);
+      console.log('Practitioner created:', practitionerResult);
+
+      // Extract practitioner ID from the result
+      const practitionerId = practitionerResult.id;
+
+      if (!practitionerId) {
+          throw new Error('Failed to get practitioner ID from creation result');
+      }
+
+      // Step 2: Create PractitionerRole with the new practitioner ID
+      const practitionerRole = await service_createPractitionerRole(practitionerId, organizationId);
+      console.log('PractitionerRole created:', practitionerRole);
+
+      // Step 3: Add 'provider' role using service_updatePractitionerRoles
+      const practitionerReference = {
+          reference: `Practitioner/${practitionerId}`
+      };
+      const organizationReference = {
+          reference: `Organization/${organizationId}`
+      };
+      
+
+
+      // Update the roles
+      console.log('Adding provider role...');
+      const roleUpdateResult = await service_patchPractitionerRole(
+          practitionerRole.id,['provider']);
+
+      console.log('Role update result:', roleUpdateResult);
+
+      // Extract invite code from the created practitioner's extensions
+      const inviteCode = practitionerResult.data?.extension?.find(
+          ext => ext.url === "https://combinebh.org/resources/FHIRResources/InviteCode.html"
+      )?.valueString;
+
+      // Return success response with all relevant data
+      res.status(201).json({
+          message: 'Provider created successfully with provider role assigned',
+          practitionerId,
+          practitionerRole: roleUpdateResult.data,
+          inviteCode,
+          data: practitionerResult.data
+      });
+
+  } catch (error) {
+      console.error('Error in createProvider:', error);
+
+      // Handle specific error cases
+      if (error.message === 'Practitioner already exists') {
+          return res.status(409).json({ 
+              error: 'Provider already exists',
+              details: error.message 
+          });
+      }
+
+      if (error.message === 'Not connected to Google Cloud') {
+          return res.status(400).json({ 
+              error: 'Not connected to Google Cloud',
+              details: error.message 
+          });
+      }
+
+      // If error occurs during role assignment, try to provide more specific error
+      if (error.message.includes('role')) {
+          return res.status(500).json({
+              error: 'Provider created but role assignment failed',
+              details: error.message,
+              stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+          });
+      }
+
+      // Handle any other errors
+      return res.status(500).json({ 
+          error: 'Failed to create Provider', 
+          details: error.message,
+          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      });
+  }
+});
+
+//find all PractionerRole resources for a single Org
 router.get('/withOrganization', async (req, res) => {
   try {
     const { organizationId } = req.query;
