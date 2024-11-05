@@ -5,13 +5,11 @@
   import { fade } from 'svelte/transition';
   import { currentLanguage, activeTranslations } from '$lib/i18n';
 
-// Add translation reactive statement
-$: currentTranslations = $activeTranslations;
 
-// Create a reactive wrapper for translations
-$: translateText = (key) => {
-  return currentTranslations[key] || key;
-};
+    $: currentTranslations = $activeTranslations;
+    $: translateText = (key) => {
+      return currentTranslations[key] || key;
+    };
 
 
 
@@ -152,7 +150,7 @@ $: translateText = (key) => {
   <div class="error">{error}</div>
 {:else}
   <div class="organization-form">
-    <h2>Edit Organization</h2>
+    <h2>{translateText('editOrganization')}</h2>
 
     <div class="form-group">
       <label for="name">{translateText('organizationName')} </label>
@@ -164,7 +162,7 @@ $: translateText = (key) => {
       />
     </div>
 
-    <h3>Contact Points</h3>
+    <h3>{translateText('contactPoints')}</h3>
     
     <div class="form-group">
       <label for="phone">{translateText('phone')}</label>

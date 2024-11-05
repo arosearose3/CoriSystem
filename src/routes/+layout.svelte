@@ -14,12 +14,15 @@
   import { writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { browser } from '$app/environment';
-  import { currentLanguage, t, activeTranslations } from '$lib/i18n'; // Import the translation function
+  import { currentLanguage, activeTranslations } from '$lib/i18n'; // Import the translation function
 
-   // Add this reactive statement to force re-renders when language changes
-   $: currentTranslations = $activeTranslations;
 
-   $: console.log('Page store:', $page);
+  $: currentTranslations = $activeTranslations;
+  $: translateText = (key) => {
+    return currentTranslations[key] || key;
+  };
+
+  $: console.log('Page store:', $page);
   $: console.log('Page URL pathname:', $page?.url?.pathname);
   $: console.log('Base path:', base);
   
@@ -30,13 +33,6 @@
   $: console.log('Is Home Page:', isHomePage);
 
   
-  // Create a reactive wrapper for t
-  $: translateText = (key) => {
-    // This will re-run when currentTranslations changes
-    return currentTranslations[key] || key;
-  };
-
-
   console.log('user store type:', typeof user);
   console.log('user store methods:', Object.keys(user));
   console.log('abilities store type:', typeof abilities);

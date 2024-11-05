@@ -1,5 +1,12 @@
 <!-- src/lib/components/UserProfile.svelte -->
 <script>
+
+import { currentLanguage, activeTranslations } from '$lib/i18n';
+  $: currentTranslations = $activeTranslations;
+  $: translateText = (key) => {
+    return currentTranslations[key] || key;
+  };
+
   export let userData = null;
   export let currentOrgName = null;
 
@@ -52,7 +59,7 @@
     <div class="user-info">
       <img src="{userData.picture}" alt="{userData.name}'s profile picture" />
       <div class="user-details">
-        <div class="name">{userData.name} at {currentOrgName}</div>
+        <div class="name">{userData.name} {translateText('at')} {currentOrgName}</div>
         <div class="email">{userData.email}</div>
       </div>
     </div>

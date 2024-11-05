@@ -46,5 +46,20 @@
     "editContact": "Edit Contact",
     "firstName": "First Name",
     "saveChanges": "Save Changes",
+    "at": "at",
+    "loadingSettings": "Loading Settings",
+    "errorLoadingSettings": "Error Loading Settings",
+
+    "notificationPreferences": "Notification Preferences",
+    "enableTextMessages": "Enable Text Messages",
+    "limitTextingHours": "Limit Texting Hours",
+    "providerInformation": "Provider Information",
+    "dateOfBirth": "Date of Birth",
+    "npiNumber": "NPI Number",
+    "saving": "Saving",
+    "saveChanges": "Save Changes",
+    "editOrganization": "Edit Organization",
+    "contactPoints": "Contact Points"
+
 
 }

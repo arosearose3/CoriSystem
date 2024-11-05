@@ -4,6 +4,14 @@
   import axios from 'axios';
   import { fade } from 'svelte/transition';
   import { base } from '$app/paths';
+  import { currentLanguage, activeTranslations } from '$lib/i18n';
+
+  $: currentTranslations = $activeTranslations;
+  $: translateText = (key) => {
+    console.log ("In translateText key:"+key);
+    return currentTranslations[key] || key;
+  };
+
 
   let state = {
     isLoading: true,
@@ -236,32 +244,35 @@
     }
   }
 
+  $: buttonText = state.isSaving ? 
+    `${translateText('saving')}...` : 
+    translateText('saveChanges');
+
   onMount(loadPractitionerData);
 </script>
 
 <div class="provider-settings">
   {#if state.isLoading}
-    <div class="loading">Loading settings...</div>
+    <div class="loading">{translateText('loadingSettings')}...</div>
   {:else if state.error}
     <div class="error" transition:fade>
       {state.error}
       <button class="close-error" on:click={() => state.error = null}>×</button>
     </div>
   {:else}
-    <h3>Provider Settings</h3>
+    <h3>{translateText('providerSettings')}</h3>
 
     <form on:submit|preventDefault={handleSave}>
       <section class="preferences">
-        <h4>Notification Preferences</h4>
-        
+        <h4>{translateText('notificationPreferences')}</h4>
+
         <div class="form-group">
           <label class="checkbox-label">
             <input 
               type="checkbox" 
               bind:checked={formData.smsEnabled}
             >
-            Enable Text Messages
-          </label>
+            {translateText('enableTextMessages')}</label>
 
           {#if formData.smsEnabled}
             <div class="sms-settings" transition:fade>
@@ -281,8 +292,7 @@
                     type="checkbox" 
                     bind:checked={formData.limitTexting}
                   >
-                  Limit Texting Hours
-                </label>
+                  {translateText('limitTextingHours')}</label>
 
                 {#if formData.limitTexting}
                   <div class="time-selectors" transition:fade>
@@ -310,10 +320,10 @@
       </section>
 
       <section class="identity">
-        <h4>Provider Information</h4>
+        <h4>{translateText('providerInformation')}</h4>
         
         <div class="form-group">
-          <label for="dob">Date of Birth</label>
+          <label for="dob">{translateText('dateOfBirth')}</label>
           <input
             type="date"
             id="dob"
@@ -322,7 +332,7 @@
         </div>
 
         <div class="form-group">
-          <label for="npi">NPI Number</label>
+          <label for="npi">{translateText('npiNumber')}</label>
           <input
             type="text"
             id="npi"
@@ -339,9 +349,9 @@
         <button
           type="submit"
           class="save-button"
-          disabled={!state.hasChanges }
+          disabled={!state.hasChanges}
         >
-          {state.isSaving ? 'Saving...' : 'Save Changes'}
+          {buttonText}
         </button>
 
         {#if state.message}

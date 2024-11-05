@@ -47,5 +47,15 @@
   "addContact": "Agregar Contacto",
   "editContact": "Editar Contacto",
   "firstName": "Nombre",
-  "saveChanges": "Guardar Cambios"
+  "saveChanges": "Guardar Cambios",
+  "at":"en",
+  "notificationPreferences": "Preferencias de Notificación",
+  "enableTextMessages": "Habilitar Mensajes de Texto",
+  "limitTextingHours": "Limitar Horas de Envío de Mensajes",
+  "providerInformation": "Información del Proveedor",
+  "dateOfBirth": "Fecha de Nacimiento",
+  "npiNumber": "Número NPI",
+  "saving": "Guardando" ,
+  "editOrganization": "Editar Organización",
+  "contactPoints": "Puntos de Contacto"
 }
