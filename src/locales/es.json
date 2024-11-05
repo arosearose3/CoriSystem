@@ -30,8 +30,22 @@
   "capacityAndAvailability": "Capacidad y Disponibilidad",
   "providerSettings": "Configuración del Proveedor",
  
-  "organizationSettings": "Configuración de la Organización"
-
-
-    
+  "organizationSettings": "Configuración de la Organización",
+  "editOrganization": "Editar Organización",
+  "contactPoints": "Puntos de Contacto",
+  "organizationName": "Nombre de la Organización",
+  "phone": "Teléfono",
+  "email": "Correo Electrónico",
+  "address": "Dirección",
+  "addressLine": "Línea de Dirección",
+  "city": "Ciudad",
+  "state": "Estado",
+  "postalCode": "Código Postal",
+  "country": "País",
+  "fax": "Fax",
+  "url": "URL",
+  "addContact": "Agregar Contacto",
+  "editContact": "Editar Contacto",
+  "firstName": "Nombre",
+  "saveChanges": "Guardar Cambios"
 }

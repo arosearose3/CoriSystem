@@ -3,6 +3,16 @@
   import { user } from '$lib/stores.js';
   import { base } from '$app/paths';
   import { fade } from 'svelte/transition';
+  import { currentLanguage, activeTranslations } from '$lib/i18n';
+
+// Add translation reactive statement
+$: currentTranslations = $activeTranslations;
+
+// Create a reactive wrapper for translations
+$: translateText = (key) => {
+  return currentTranslations[key] || key;
+};
+
 
 
   let loading = true;
@@ -145,7 +155,7 @@
     <h2>Edit Organization</h2>
 
     <div class="form-group">
-      <label for="name">Organization Name</label>
+      <label for="name">{translateText('organizationName')} </label>
       <input 
         type="text" 
         id="name" 
@@ -157,7 +167,7 @@
     <h3>Contact Points</h3>
     
     <div class="form-group">
-      <label for="phone">Phone</label>
+      <label for="phone">{translateText('phone')}</label>
       <input 
         type="tel" 
         id="phone" 
@@ -167,7 +177,7 @@
     </div>
 
     <div class="form-group">
-      <label for="fax">Fax</label>
+      <label for="fax">{translateText('fax')}</label>
       <input 
         type="tel" 
         id="fax" 
@@ -187,7 +197,7 @@
     </div>
 
     <div class="form-group">
-      <label for="url">Website</label>
+      <label for="url">{translateText('website')}</label>
       <input 
         type="url" 
         id="url" 
@@ -199,7 +209,7 @@
     <h3>Address</h3>
 
     <div class="form-group">
-      <label for="addressLine">Street Address</label>
+      <label for="addressLine">{translateText('streetAddress')} </label>
       <input 
         type="text" 
         id="addressLine" 
@@ -209,7 +219,7 @@
     </div>
 
     <div class="form-group">
-      <label for="city">City</label>
+      <label for="city">{translateText('city')}</label>
       <input 
         type="text" 
         id="city" 
@@ -219,7 +229,7 @@
     </div>
 
     <div class="form-group">
-      <label for="state">State</label>
+      <label for="state">{translateText('state')}</label>
       <input 
         type="text" 
         id="state" 
@@ -229,7 +239,7 @@
     </div>
 
     <div class="form-group">
-      <label for="postalCode">Postal Code</label>
+      <label for="postalCode">{translateText('postalCode')}</label>
       <input 
         type="text" 
         id="postalCode" 
@@ -239,7 +249,7 @@
     </div>
 
     <div class="form-group">
-      <label for="country">Country</label>
+      <label for="country">{translateText('country')}</label>
       <input 
         type="text" 
         id="country" 
@@ -250,7 +260,7 @@
 
     <div class="form-actions">
       <div class="button-feedback-container">
-        <button on:click={handleSubmit}>Save Changes</button>
+        <button on:click={handleSubmit}>{translateText('saveChanges')}</button> 
         {#if feedbackMessage}
           <span 
             class="feedback-message {feedbackType}"
