@@ -12,6 +12,8 @@
   import { createEventDispatcher } from 'svelte';
   const dispatch = createEventDispatcher();
 
+  import { t } from '$lib/i18n';
+
   let activeView = 'orgs';
   let chosenOrg;
   let showChooseOrg = true;
@@ -30,13 +32,13 @@
 
 <!-- Navigation bar -->
 <div class="navbar">
-  <a class={activeView === 'orgs' ? 'active' : ''} on:click={() => setView('orgs')}>Orgs</a>
-  <a class={activeView === 'status' ? 'active' : ''} on:click={() => setView('status')}>System Status</a>
-  <a class={activeView === 'loadData' ? 'active' : ''} on:click={() => setView('loadData')}>Load Data</a>
-  <a class={activeView === 'addOrg' ? 'active' : ''} on:click={() => setView('addOrg')}>Add Organization</a>
-  <a class={activeView === 'associateProviders' ? 'active' : ''} on:click={() => setView('associateProviders')}>Associate Providers</a>
-  <a class={activeView === 'setRoles' ? 'active' : ''} on:click={() => setView('setRoles')}>Set Roles</a>
-  <a class={activeView === 'exclusion' ? 'active' : ''} on:click={() => setView('exclusion')}>Exclusion Files</a> <!-- Added Exclusion Files option -->
+  <a class={activeView === 'orgs' ? 'active' : ''} on:click={() => setView('orgs')}>{t('orgs')}</a>
+  <a class={activeView === 'status' ? 'active' : ''} on:click={() => setView('status')}>{t('status')}</a>
+  <a class={activeView === 'loadData' ? 'active' : ''} on:click={() => setView('loadData')}>{t('loadData')}</a>
+  <a class={activeView === 'addOrg' ? 'active' : ''} on:click={() => setView('addOrg')}>{t('addOrg')}</a>
+  <a class={activeView === 'associateProviders' ? 'active' : ''} on:click={() => setView('associateProviders')}>{t('associateProviders')}</a>
+  <a class={activeView === 'setRoles' ? 'active' : ''} on:click={() => setView('setRoles')}>{t('setRoles')}</a>
+  <a class={activeView === 'exclusion' ? 'active' : ''} on:click={() => setView('exclusion')}>{t('exclusion')}</a>
 </div>
 
 <!-- Conditional rendering for each view -->

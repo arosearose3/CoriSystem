@@ -2,6 +2,15 @@
   import { navItems } from '$lib/navConfig.js';
   import { user, abilities } from '$lib/stores.js';
   import { base } from '$app/paths';
+  import { currentLanguage, activeTranslations } from '$lib/i18n';
+
+  // Add translation reactive statement
+  $: currentTranslations = $activeTranslations;
+  
+  // Create a reactive wrapper for translations
+  $: translateText = (key) => {
+    return currentTranslations[key] || key;
+  };
 
   // Reactive variables
   $: userData = $user;
@@ -9,10 +18,10 @@
   $: userRoles = userData?.practitioner?.roles ?? [];
   $: hasSingleRole = userRoles.length === 1;
 
-  // Initialize the expanded/collapsed state for each role to false (collapsed by default)
+  // Initialize the expanded/collapsed state for each role to false
   let expandedRoles = {};
 
-  // Initialize expandedRoles for each user role to be collapsed by default
+  // Initialize expandedRoles for each user role
   $: if (userRoles.length > 1) {
     expandedRoles = userRoles.reduce((acc, role) => {
       acc[role] = false;
@@ -20,55 +29,57 @@
     }, {});
   }
 
-  // Function to toggle the visibility of a role's nav links
   function toggleRole(role) {
     expandedRoles = { ...expandedRoles, [role]: !expandedRoles[role] };
   }
 
-  // Check access function - now checks role-specific permissions using CASL
   function hasAccess(action, subject) {
-    return ability?.can(action, subject); // Check if the user has specific action permission for the subject
+    return ability?.can(action, subject);
   }
 
-  // Check if a nav item belongs to the specific role
   function belongsToRole(item, role) {
-    // Ensure the role is valid for the nav item and the user has access to the subject for 'view'
     return item.roles.includes(role) && hasAccess('view', item.subject);
   }
+
+  // Add a function to get translated role name if needed
+  $: getTranslatedRole = (role) => {
+    const roleTranslationKey = `role_${role.toLowerCase()}`;
+    return translateText(roleTranslationKey);
+  };
 </script>
 
 <nav class="navigation">
   {#if userRoles.length > 0 && ability.rules.length > 0}
     {#if hasSingleRole}
-      <!-- Display nav items directly for single role -->
+      <!-- Single role view -->
       <ul class="nav-list single-role">
         {#each navItems.filter(item => belongsToRole(item, userRoles[0])) as item}
           <li class="nav-item">
-            <a class="nav-link" href={item.path} aria-label={item.label}>
+            <a class="nav-link" href={item.path} aria-label={translateText(item.labelKey)}>
               {#if item.icon}
                 <span class="nav-icon">{item.icon}</span>
               {/if}
-              {item.label}
+              {translateText(item.labelKey)}
             </a>
           </li>
         {/each}
       </ul>
     {:else}
-      <!-- Display collapsible sections for multiple roles -->
+      <!-- Multiple roles view -->
       {#each userRoles as role}
         <div class="role-section">
           <div class="role-header" on:click={() => toggleRole(role)}>
-            <span class="role-title">{role}</span>
+            <span class="role-title">{getTranslatedRole(role)}</span>
             <span class="toggle-icon">{expandedRoles[role] ? '▲' : '▼'}</span>
           </div>
           <ul class="nav-list" class:expanded={expandedRoles[role]}>
             {#each navItems.filter(item => belongsToRole(item, role)) as item}
               <li class="nav-item">
-                <a class="nav-link" href={item.path} aria-label={item.label}>
+                <a class="nav-link" href={item.path} aria-label={translateText(item.labelKey)}>
                   {#if item.icon}
                     <span class="nav-icon">{item.icon}</span>
                   {/if}
-                  {item.label}
+                  {translateText(item.labelKey)}
                 </a>
               </li>
             {/each}
@@ -78,6 +89,7 @@
     {/if}
   {/if}
 </nav>
+
 
 <style>
   .navigation {

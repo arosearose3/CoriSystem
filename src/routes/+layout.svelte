@@ -14,11 +14,35 @@
   import { writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { browser } from '$app/environment';
+  import { currentLanguage, t, activeTranslations } from '$lib/i18n'; // Import the translation function
+
+   // Add this reactive statement to force re-renders when language changes
+   $: currentTranslations = $activeTranslations;
+
+   $: console.log('Page store:', $page);
+  $: console.log('Page URL pathname:', $page?.url?.pathname);
+  $: console.log('Base path:', base);
+  
+  // Fixed home page detection
+  $: isHomePage = browser && $page?.url?.pathname === base + '/' || $page?.url?.pathname === '/';
+  
+  // Log the result
+  $: console.log('Is Home Page:', isHomePage);
+
+  
+  // Create a reactive wrapper for t
+  $: translateText = (key) => {
+    // This will re-run when currentTranslations changes
+    return currentTranslations[key] || key;
+  };
+
 
   console.log('user store type:', typeof user);
   console.log('user store methods:', Object.keys(user));
   console.log('abilities store type:', typeof abilities);
   console.log('abilities store methods:', Object.keys(abilities));
+
+
 
  let sidebarWidth = 250; // Default width
  let isDragging = false;
@@ -69,8 +93,7 @@
     console.log("+layout Reactive User data:", JSON.stringify($user));
   }
 
-  // Home page detection
-  $: isHomePage = browser ? $page.url.pathname === `${base}/` : false;
+
 
   // Access environment variable using import.meta.env
   if (browser && import.meta.env.VITE_RUNTIME_ENV === "dev") {
@@ -471,7 +494,19 @@ async function handleInviteCode(event) {
   }
 }
 
+  // Add a reactive statement to log language changes
+  $: console.log('Current language:', $currentLanguage);
+  
+  function switchLanguage() {
+    currentLanguage.update(lang => {
+      const newLang = lang === 'en' ? 'es' : 'en';
+      console.log('Switching language to:', newLang);
+      return newLang;
+    });
+  }
 </script>
+
+
 
 <div class="app-container">
    <aside class="sidebar" style="width: {sidebarWidth}px">
@@ -480,15 +515,27 @@ async function handleInviteCode(event) {
         <a href="{base}" class="sidebar-logo-container">
           <img src="{base}/apple-touch-icon.png" alt="Logo" class="sidebar-logo" />
           <div class="sidebar-title">
-            Colorado<br />
-            Referral<br />
-            Information
+            {translateText('coloradoReferralInformation')}
           </div>
         </a>
         {#if serving_dev}
            <div class="development-banner">Development Server</div>
         {/if}
       </div>
+      
+<!-- Language Toggle Switch -->
+<div class="language-toggle">
+  <span>English</span>
+  <label class="switch">
+    <input 
+      type="checkbox" 
+      on:change={switchLanguage}
+      checked={$currentLanguage === 'es'}
+    />
+    <span class="slider round"></span>
+  </label>
+  <span>Español</span>
+</div>
     </div>
 
     <div class="navigation-container">
@@ -499,19 +546,24 @@ async function handleInviteCode(event) {
       <div class="auth-buttons">
         {#if browser}
           {#if $user?.user?.id}
-            
-            <button class="nav-button logout" on:click={handleLogout} aria-label="Log Out">Logout</button>
+            <button class="nav-button logout" on:click={handleLogout} aria-label={translateText('logout')}>
+              {translateText('logout')}
+            </button>
           {:else}
-            <button class="nav-button" on:click={handleGoogleLogin} aria-label="Log In with Google">Login with Google</button>
-            <button class="nav-button" on:click={handleFBLogin} aria-label="Log In with Facebook">Login with Facebook</button>
+            <button class="nav-button" on:click={handleGoogleLogin}>
+              {translateText('loginWithGoogle')}
+            </button>
+            <button class="nav-button" on:click={handleFBLogin}>
+              {translateText('loginWithFacebook')}
+            </button>
           {/if}
         {:else}
           <!-- Placeholder for SSR -->
-          <div class="nav-button">Login</div>
+          <div class="nav-button">{translateText('loginWithGoogle')}</div>
         {/if}
       </div>
-      <a href="{base}/TOS" class="footer-link">Cori Terms of Service</a>
-      <a href="{base}/PrivacyPolicy" class="footer-link">Privacy Policy</a>
+      <a href="{base}/TOS" class="footer-link">{translateText('termsOfService')}</a>
+      <a href="{base}/PrivacyPolicy" class="footer-link">{translateText('privacyPolicy')}</a>
       <span class="copyright">© 2024 Cori, a Colorado 501(c)(3)</span>
     </div>
   </aside>
@@ -708,4 +760,54 @@ async function handleInviteCode(event) {
      font-size: 12px;
    }
  }
+
+ .language-toggle {
+  display: flex;
+  align-items: center;
+  margin-top: 10px;
+}
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 34px;
+  height: 20px;
+  margin: 0 10px;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .4s;
+}
+input:checked + .slider {
+  background-color: #2196F3;
+}
+input:checked + .slider:before {
+  transform: translateX(14px);
+}
+.slider.round {
+  border-radius: 34px;
+}
+.slider.round:before {
+  border-radius: 50%;
+}
 </style>

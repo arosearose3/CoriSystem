@@ -1,4 +1,5 @@
 import { base } from '$app/paths'; // Import the base path
+//import { t } from '$lib/i18n'; // Import the translation function
 
 export const navItems = [
 /*   {
@@ -16,7 +17,7 @@ export const navItems = [
     roles: ['orgadmin'], // Accessible by orgadmin and admin roles
   }, */
   {
-    label: 'Cori Helpdesk',
+    labelKey: 'coriHelpdesk',
     icon: '☎',
     // path: `https://corisystem.atlassian.net/servicedesk/customer/portal/1`,
     path: `${base}/helpdesk`,
@@ -24,7 +25,7 @@ export const navItems = [
     roles: ['provider','client','referrer','orgadmin','admin'], // Accessible only by admin
   },
   {
-    label: 'All Cori Clients',
+    labelKey: 'allCoriClients',
     icon: '⚙️',
     path: `${base}/clients/admin`,
     subject: 'Cori Clients',
@@ -38,14 +39,14 @@ export const navItems = [
     roles: ['orgadmin'], 
   }, */
   {
-    label: 'Staff Availability',
+    labelKey: 'staffAvailability',
     icon: '⚙️',
     path: `${base}/staff/orgadmin`,
     subject: 'Organization Staff',
     roles: ['orgadmin'], 
   },
   {
-    label: 'Staff Information',
+    labelKey: 'staffInformation',
     icon: '⚙️',
     path: `${base}/org/stafflist`,
     subject: 'Organization Staff List',
@@ -53,14 +54,14 @@ export const navItems = [
   },
 
   {
-    label: 'All Cori Staff',
+    labelKey: 'allCoriStaff',
     icon: '⚙️',
     path: `${base}/staff/admin`,
     subject: 'Cori Staff',
     roles: ['admin'], // Accessible only by admin
   },
   {
-    label: 'All Cori Organizations',
+    labelKey: 'allCoriOrganizations',
     icon: '🛠️',
     path: `${base}/admin/organizations`,
     subject: 'Admin',
@@ -68,7 +69,7 @@ export const navItems = [
 
   },
   {
-    label: 'System Settings',
+    labelKey: 'systemSettings',
     icon: '⚙️',
     path: `${base}/settings/admin`,
     subject: 'Admin Settings',
@@ -76,7 +77,7 @@ export const navItems = [
 
   },
   {
-    label: 'Organization Settings',
+    labelKey: 'organizationSettings',
     icon: '⚙️',
     path: `${base}/settings/orgadmin`,
     subject: 'Org Settings',
@@ -84,7 +85,7 @@ export const navItems = [
 
   },
   {
-    label: 'Provider Settings',
+    labelKey: 'providerSettings',
     icon: '⚙️',
     path: `${base}/settings/provider`,
     subject: 'Provider Settings',
@@ -92,7 +93,7 @@ export const navItems = [
 
   },
   {
-    label: 'Client Settings',
+    labelKey: 'clientSettings',
     icon: '⚙️',
     path: `${base}/settings/client`,
     subject: 'Client Settings',
@@ -109,7 +110,7 @@ export const navItems = [
 
   }, */
   {
-    label: 'Search for Services',
+    labelKey: 'searchForServices',
     icon: '🔍',
     path: `${base}/organizationsearch`,
     subject: 'Organization Search',
@@ -131,7 +132,7 @@ export const navItems = [
     roles: ['client', 'provider','orgadmin', 'admin'],
   }, */
   {
-    label: 'Capacity and Availability',
+    labelKey: 'capacityAndAvailability',
     icon: '✉️',
     path: `${base}/capacity`,
     subject: 'Capacity',

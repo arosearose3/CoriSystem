@@ -1,0 +1,37 @@
+{
+  "orgs": "Organizaciones",
+  "status": "Estado del Sistema",
+  "loadData": "Cargar Datos",
+  "addOrg": "Agregar Organización",
+  "associateProviders": "Asociar Proveedores",
+  "setRoles": "Establecer Roles",
+  "exclusion": "Archivos de Exclusión",
+  "welcomeMessage": "Bienvenido al sistema",
+  "logout": "Cerrar sesión",
+  "loginWithGoogle": "Iniciar sesión con Google",
+  "loginWithFacebook": "Iniciar sesión con Facebook",
+  "termsOfService": "Términos de Servicio de Cori",
+  "privacyPolicy": "Política de Privacidad",
+  "clients": "Clientes",
+  "providerClients": "Clientes del Proveedor",
+  "organizationClients": "Clientes de la Organización",
+  "coriHelpdesk": "Cori Mesa de Ayuda",
+  "helpdesk": "Mesa de Ayuda",
+  "staffAvailability": "Disponibilidad del Personal",
+  "staffInformation": "Información del Personal",
+  "welcomeMessage": "Bienvenido a Cori: Información de Referencias de Colorado",
+      
+  "coloradoReferralInformation": "Información de Referencias de Colorado",
+  "role_coordinator": "Coordinador(a)",
+  "role_provider": "Proveedor(a)",
+  "role_admin": "Administrador(a) del Sistema",
+  "role_orgadmin": "Administrador(a) de la Organización",
+
+  "capacityAndAvailability": "Capacidad y Disponibilidad",
+  "providerSettings": "Configuración del Proveedor",
+ 
+  "organizationSettings": "Configuración de la Organización"
+
+
+    
+}
