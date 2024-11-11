@@ -116,6 +116,22 @@ export const navItems = [
     roles: ['admin'], 
 
   },
+  {
+    labelKey: 'coriUI',
+    icon: '⚙️',
+    path: `${base}/coricode/pickui`,
+    subject: 'Cori UI',
+    roles: ['admin'], 
+
+  },
+  {
+    labelKey: 'coriUItest',
+    icon: '⚙️',
+    path: `${base}/coricode/pickuitest`,
+    subject: 'Cori UItest',
+    roles: ['admin'], 
+
+  },
   
 /*   {
     label: 'Consents',

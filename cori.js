@@ -385,10 +385,10 @@ process.on('SIGTERM', () => {
 });
 
 // Start the event processor
-initializeEventProcessor().catch(error => {
+/* initializeEventProcessor().catch(error => {
   console.error('Failed to init EventProcessor:', error);
   process.exit(1);
-});
+}); */
 
 const PORT = process.env.SERVER_PORT || 3001;
 const server = https.createServer(httpsOptions, app).listen(PORT, () => {

@@ -4,7 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
-import { Plus, Trash2, MoveVertical, Save } from 'lucide-react';
+import Plus from 'lucide-svelte/icons/plus';
+import Trash2  from 'lucide-svelte/icons/trash2';
+import MoveVerticalfrom 'lucide-svelte/icons/movevertical';
+import Save from 'lucide-svelte/icons/save';
 
 const PlanDefinitionEditor = () => {
   const [planDefinition, setPlanDefinition] = useState({
