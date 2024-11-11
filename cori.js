@@ -3,7 +3,9 @@ import express from 'express';
 import session from 'express-session';
 import { OAuth2Client } from 'google-auth-library';
 import { handler } from './build/handler.js'; // Import the SvelteKit handler
-import http from 'http';
+// import http from 'http';
+import https from 'https';
+import fs from 'fs'; 
 import { createServer } from 'vite';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -27,15 +29,28 @@ import roleRoutes from './routes/roleRoutes.js';
 import serverstatsRoutes from './routes/serverstatsRoutes.js';
 import serviceRequestRoutes from './routes/serviceRequestRoutes.js';
 import taskRoutes from './routes/taskRoutes.js';
+//import subscriptionRoutes from './routes/subscriptionRoutes.js';
+
+import activityDefinitionRoutes from './routes/activityDefinitionRoutes.js';
+import planDefinitionRoutes from './routes/planDefinitionRoutes.js';
+import timerRoutes from './routes/timerRoutes.js';
+
+import templateActivityRoutes from './routes/templateActivityRoutes.js'; 
+import templateEventRoutes from './routes/templateEventRoutes.js'; 
+import templatePlanRoutes from './routes/templatePlanRoutes.js'; 
+
+import eventRoutes from './routes/eventRoutes.js';
+import {initializeEventProcessor} from './routes/EventProcessor/initializeEventProcessor.js';
 
 
 import { BASE_PATH } from './serverutils.js'; // Adjust the path as necessary
 
 dotenv.config(); // Load environment variables
-
 const app = express();
-const server = http.createServer(app);
-const PORT = process.env.SERVER_PORT;
+
+let eventProcessor = null;
+
+
 
 // Setup Google OAuth2 client
 const oauth2Client = new OAuth2Client(
@@ -45,7 +60,6 @@ const oauth2Client = new OAuth2Client(
   
 );
 
-
 app.use(cors({
   origin: process.env.CLIENT_URL, // Ensure this matches your client URL
   credentials: true
@@ -54,8 +68,19 @@ app.use(cors({
 app.use(express.json());
 app.use(express.static('public'));
 
-app.use((req, res, next) => {
+/* app.use((req, res, next) => {
   console.log('Route called:', req.method, req.url);
+  next();
+}); */
+
+app.use((req, res, next) => {
+  console.log('Incoming request:', {
+    method: req.method,
+    url: req.url,
+    path: req.path,
+    basePath: BASE_PATH,
+    fullPath: `${BASE_PATH}${req.path}`
+  });
   next();
 });
 
@@ -317,14 +342,55 @@ app.use(`${BASE_PATH}/api/role`, roleRoutes);
 app.use(`${BASE_PATH}/api/serverstats`, serverstatsRoutes);
 app.use(`${BASE_PATH}/api/servicerequest`, serviceRequestRoutes);
 app.use(`${BASE_PATH}/api/task`, taskRoutes);
+app.use(`${BASE_PATH}/api/activityDefinition`, activityDefinitionRoutes);
+app.use(`${BASE_PATH}/api/planDefinition`, planDefinitionRoutes);
+//app.use(`${BASE_PATH}/api/subscription`, subscriptionRoutes);
+app.use(`${BASE_PATH}/api/timer`, timerRoutes);
+app.use(`${BASE_PATH}/api/templates/activities`, templateActivityRoutes);
+app.use(`${BASE_PATH}/api/templates/events`, templateEventRoutes);
+app.use(`${BASE_PATH}/api/templates/plans`, templatePlanRoutes);
 
+app.use(`${BASE_PATH}/events`, eventRoutes);
+
+/* app.post(`${BASE_PATH}/events/receive/fhirEvent`, (req, res) => {
+  console.log('Received Pub/Sub message:', req.body);
+  res.status(200).send();
+}); */
+
+app.post(`${BASE_PATH}/`, (req, res) => {
+  console.log('responding with 200 to $BASE_PATH/', req.body);
+  res.status(200).send();
+});
+
+app.post("/", (req, res) => {
+  console.log('responding with 200 to post./ ', req.body);
+  res.status(200).send();
+});
 
 // Handle all other requests with the SvelteKit handler
 app.use((req, res, next) => {
   handler(req, res, next);
 });
 
-// Start the Express server
-server.listen(PORT, () => {
-  console.log(`Server is running at http://localhost:${PORT}`);
+const httpsOptions = {
+  key: fs.readFileSync('./certs/localhost-key.pem'),
+  cert: fs.readFileSync('./certs/localhost.pem')
+};
+
+// Handle shutdown gracefully
+process.on('SIGTERM', () => {
+  logger.info('SIGTERM received, shutting down...');
+  // Add any cleanup needed for eventProcessor
+  process.exit(0);
+});
+
+// Start the event processor
+initializeEventProcessor().catch(error => {
+  console.error('Failed to init EventProcessor:', error);
+  process.exit(1);
+});
+
+const PORT = process.env.SERVER_PORT || 3001;
+const server = https.createServer(httpsOptions, app).listen(PORT, () => {
+  console.log(`HTTPS Server running on port ${PORT}`);
 });

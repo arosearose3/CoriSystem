@@ -100,6 +100,22 @@ export const navItems = [
     roles: ['client'], 
 
   },
+  {
+    labelKey: 'coriCode',
+    icon: '⚙️',
+    path: `${base}/coricode`,
+    subject: 'Coricode',
+    roles: ['admin'], 
+
+  },
+  {
+    labelKey: 'coriPlans',
+    icon: '⚙️',
+    path: `${base}/coriplans`,
+    subject: 'Cori Plans',
+    roles: ['admin'], 
+
+  },
   
 /*   {
     label: 'Consents',
