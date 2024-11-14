@@ -18,7 +18,8 @@ export async function updateTimer(id, timerData) {
 }
 
 export async function deleteTimer(id, timerName) {
-    const response = await axios.delete(`/api/timer/${id}`, {
+  console.log ("timerServices-client deleteTimer id: ", id, " timerName: ", timerName);
+    const response = await axios.post(`/api/timer/delete/${id}`, {
       data: {
         timerName
       }

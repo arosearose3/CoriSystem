@@ -5,6 +5,7 @@
   
     export let timer = null; // If null, we're creating new timer
   
+    let oldname = timer?.oldname || '';
     let name = timer?.name || '';
     let description = timer?.description || '';
     let schedule = timer?.schedule || '0 0 * * *';
@@ -29,6 +30,7 @@ async function handleSubmit() {
   error = null;
 
   const timerData = {
+    oldname,
     name,
     description,
     schedule,

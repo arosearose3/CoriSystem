@@ -39,6 +39,8 @@ import templateActivityRoutes from './routes/templateActivityRoutes.js';
 import templateEventRoutes from './routes/templateEventRoutes.js'; 
 import templatePlanRoutes from './routes/templatePlanRoutes.js'; 
 
+import endpointRoutes from './routes/endpointRoutes.js'; 
+
 import eventRoutes from './routes/eventRoutes.js';
 import {initializeEventProcessor} from './routes/EventProcessor/initializeEventProcessor.js';
 
@@ -349,6 +351,8 @@ app.use(`${BASE_PATH}/api/timer`, timerRoutes);
 app.use(`${BASE_PATH}/api/templates/activities`, templateActivityRoutes);
 app.use(`${BASE_PATH}/api/templates/events`, templateEventRoutes);
 app.use(`${BASE_PATH}/api/templates/plans`, templatePlanRoutes);
+
+app.use(`${BASE_PATH}/api/webhook`, endpointRoutes);
 
 app.use(`${BASE_PATH}/events`, eventRoutes);
 

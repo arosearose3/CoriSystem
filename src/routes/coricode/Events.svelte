@@ -3,7 +3,7 @@
   import { onMount } from 'svelte';
   import Timers from './Timers.svelte';
   import DataChanges from './DataChanges.svelte';
- // import Webhooks from './Webhooks.svelte';
+  import Webhooks from './Webhooks.svelte';
 
   let activeView = 'timers';
 
@@ -40,8 +40,8 @@
       <Timers />
     {:else if activeView === 'dataChanges'}
       <DataChanges />
-   <!--  {:else if activeView === 'webhooks'}
-      <Webhooks /> -->
+     {:else if activeView === 'webhooks'}
+      <Webhooks /> 
     {/if}
   </div>
 </div>

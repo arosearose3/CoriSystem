@@ -56,6 +56,35 @@ export async function initializeEventProcessor() {
     await eventProcessor.initialize();
     console.log("Event processor initialized.");
 
+    //webhook endpoints 
+    app.post('/event/webhook/*', async (req, res) => {
+      try {
+        // Get the full path from the request
+        const path = req.path;
+        const payload = req.body;
+        
+        console.log(`Received webhook event for path ${path}:`, payload);
+
+        logger.info('Received webhook event', {
+          path,
+          contentType: req.headers['content-type']
+        });
+
+        await eventProcessor.handleWebhook(path, payload, req.headers);
+
+        console.log("Webhook event processed successfully.");
+        res.status(204).send();
+      } catch (error) {
+        if (error.message.startsWith('Unknown webhook path:')) {
+          res.status(404).json({ error: error.message });
+        } else {
+          console.error("Error processing webhook:", error);
+          logger.error('Error processing webhook', error);
+          res.status(500).json({ error: error.message });
+        }
+      }
+    });
+
     // FHIR change endpoint
     console.log("Setting up /fhir-changed endpoint...");
     app.post('/fhir-changed', async (req, res) => {
@@ -78,23 +107,23 @@ export async function initializeEventProcessor() {
       }
     });
 
-    // PubSub push endpoint
-    console.log("Setting up /pubsub/push endpoint...");
-    app.post('/pubsub/push', async (req, res) => {
+    // Timer push endpoint
+    console.log("Setting up /timer/push endpoint...");
+    app.post('/timer/push', async (req, res) => {
       try {
         const message = req.body.message;
-        console.log("Received PubSub message:", message);
+        console.log("Received Timer message:", message);
 
-        logger.info('Received PubSub message', {
+        logger.info('Received Timer message', {
           subscription: message.attributes?.subscription,
         });
-        await eventProcessor.handlePubSubEvent(message);
+        await eventProcessor.handleTimerEvent(message);
 
-        console.log("PubSub message processed successfully.");
+        console.log("Timer message processed successfully.");
         res.status(204).send();
       } catch (error) {
-        console.error("Error processing PubSub message:", error);
-        logger.error('Error processing PubSub message', error);
+        console.error("Error processing Timer message:", error);
+        logger.error('Error processing Timer message', error);
         res.status(500).json({ error: error.message });
       }
     });
@@ -114,7 +143,13 @@ export async function initializeEventProcessor() {
       res.json({
         status: 'healthy',
         fhirEventTypes: Array.from(eventProcessor.fhirChangeEvents.keys()),
-        pubSubSubscriptions: Array.from(eventProcessor.pubSubEvents.keys()),
+        timerSchedules: Array.from(eventProcessor.timerEvents.keys()),
+        registeredEndpoints: Array.from(eventProcessor.endpointMap.entries()).map(([name, info]) => ({
+          name,
+          path: info.path,
+          status: info.status
+        })),
+        webhookPaths: eventProcessor.getRegisteredWebhookPaths(),
         uptime: process.uptime(),
       });
     });

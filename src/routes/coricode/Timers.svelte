@@ -13,11 +13,13 @@
   try {
     loading = true;
     const eventTemplates = await getAllTimers();
+    console.log ("eventTemplates", eventTemplates);
     timers = eventTemplates.map(template => ({
       id: template.id,
-      name: template.name,
+      oldname: template.schedulerJobId,
+      name: template.schedulerJobId,
       schedule: template.schedule,
-      description: template.description,
+      description: template.name,
       nextRun: calculateNextRun(template.schedule)
     }));
   } catch (e) {

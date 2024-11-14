@@ -82,7 +82,7 @@ router.post('/create', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, description, schedule, timeZone } = req.body;
+    const { oldname, name, description, schedule, timeZone } = req.body;
 
     // Validate required fields
     if (!name || !schedule) {
@@ -92,6 +92,7 @@ router.put('/:id', async (req, res) => {
     }
 
     const result = await updateTimer(id, {
+      oldname,
       name,
       description,
       schedule,
@@ -122,11 +123,12 @@ router.put('/:id', async (req, res) => {
 
 
 // Deletes Google Scheduler Job and Fhir TimerEventTemplate resource
-router.delete('/:timerId', async (req, res) => {
+router.post('/delete/:timerId', async (req, res) => {
   try {
     const { timerId } = req.params;
-    const { timerName } = req.body;
+    const { timerName } = req.body.data;
 
+    console.log ("timerRoutes delete timerId: ", timerId, " timerName: ", timerName);
     if (!timerId || !timerName) {
       return res.status(400).json({
         error: 'Timer ID and Timer Name are required'

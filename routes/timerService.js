@@ -810,7 +810,7 @@ export async function updateTimerEventTemplate(id, updateData) {
 export async function updateTimer(id, updateData) {
   try {
     // Validate required fields
-    const { name, schedule } = updateData;
+    const { oldname, name, schedule } = updateData;
     if (!name || !schedule) {
       throw new Error('Name and schedule are required for timer update');
     }
@@ -819,7 +819,7 @@ export async function updateTimer(id, updateData) {
   
       // Find the template with this scheduler job ID
       const templates = await getAllTimerEventTemplates();
-      const template = templates.find(t => t.schedulerJobId === id);
+      const template = templates.find(t => t.schedulerJobId === oldname);
       
       if (!template) {
         throw new Error('Timer template not found');
