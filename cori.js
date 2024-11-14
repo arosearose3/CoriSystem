@@ -12,6 +12,12 @@ import dotenv from 'dotenv';
 import passport from 'passport';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
 
+import { ActivityExecutor } from './routes/EventProcessor/activityExecutor.js';
+import { EventProcessor } from './routes/EventProcessor/eventProcessor2.js';
+import { createLogger } from './routes/EventProcessor/logger.js';
+
+import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
+
 
 import api211Routes from './routes/api211Routes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
@@ -41,16 +47,71 @@ import templatePlanRoutes from './routes/templatePlanRoutes.js';
 
 import endpointRoutes from './routes/endpointRoutes.js'; 
 
-import eventRoutes from './routes/eventRoutes.js';
-import {initializeEventProcessor} from './routes/EventProcessor/initializeEventProcessor.js';
 
+import { getFhirAccessToken} from './src/lib/auth/auth.js';
+import { auth, healthcare, BASE_PATH,PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID, handleBlobResponse } from './serverutils.js';
 
-import { BASE_PATH } from './serverutils.js'; // Adjust the path as necessary
+import axios from 'axios';
 
 dotenv.config(); // Load environment variables
+
+const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
+
+
 const app = express();
 
+const logger = createLogger({
+  service: 'cori-server',
+  level: process.env.LOG_LEVEL || 'debug'
+});
+
+// callFhirApi is used in the ActivityExecutor
+// path coming in needs to be a FHIR path, not a coripath. 
+async function callFhirApi(method, path, data = null) {
+  const accessToken = await getFhirAccessToken();
+  const url = path.startsWith('/') ? `${FHIR_BASE_URL}${path}` : `${FHIR_BASE_URL}/${path}`;
+  
+  const config = {
+    method,
+    url,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: 'application/fhir+json'
+    }
+  };
+
+  // Add data and Content-Type for POST, PUT, PATCH
+  if (['POST', 'PUT', 'PATCH'].includes(method.toUpperCase()) && data) {
+    config.data = data;
+    config.headers['Content-Type'] = 'application/fhir+json';
+  }
+
+  try {
+    const response = await axios(config);
+    return response.data;
+  } catch (error) {
+    logger.error('FHIR API call failed', { method, path, error });
+    throw error;
+  }
+}
+
+const activityExecutor = new ActivityExecutor({
+  callFhirApi,
+  logger
+});
+
 let eventProcessor = null;
+
+async function initializeEventProcessing() {
+  try {
+    eventProcessor = new EventProcessor(callFhirApi, activityExecutor, logger);
+    await eventProcessor.initialize();
+    logger.info('Event processor initialized successfully');
+  } catch (error) {
+    logger.error('Failed to initialize event processor', error);
+    throw error;
+  }
+}
 
 
 
@@ -80,8 +141,8 @@ app.use((req, res, next) => {
     method: req.method,
     url: req.url,
     path: req.path,
-    basePath: BASE_PATH,
-    fullPath: `${BASE_PATH}${req.path}`
+ //   basePath: BASE_PATH,
+ //   fullPath: `${BASE_PATH}${req.path}`
   });
   next();
 });
@@ -134,9 +195,9 @@ passport.use(new FacebookStrategy({
 
 
 
+
 // Route to start OAuth2 process
 app.get(`${BASE_PATH}/auth/facebook/url`, passport.authenticate('facebook', { scope: ['email'] }));
-
 
 
 app.get(`${BASE_PATH}/auth/facebook/callback`,
@@ -354,12 +415,7 @@ app.use(`${BASE_PATH}/api/templates/plans`, templatePlanRoutes);
 
 app.use(`${BASE_PATH}/api/webhook`, endpointRoutes);
 
-app.use(`${BASE_PATH}/events`, eventRoutes);
-
-/* app.post(`${BASE_PATH}/events/receive/fhirEvent`, (req, res) => {
-  console.log('Received Pub/Sub message:', req.body);
-  res.status(200).send();
-}); */
+app.use(`${BASE_PATH}/events`, createEventRoutes(eventProcessor, logger));
 
 app.post(`${BASE_PATH}/`, (req, res) => {
   console.log('responding with 200 to $BASE_PATH/', req.body);
@@ -376,25 +432,44 @@ app.use((req, res, next) => {
   handler(req, res, next);
 });
 
+
+
+// Handle shutdown gracefully
+process.on('SIGTERM', async () => {
+  logger.info('SIGTERM received, initiating shutdown');
+  
+  if (eventProcessor) {
+    try {
+      // Cancel any active executions
+      const activeExecutions = eventProcessor.activityExecutor.getActiveExecutions();
+      for (const execution of activeExecutions) {
+        if (execution.status === 'running') {
+          eventProcessor.activityExecutor.cancelExecution(execution.id);
+        }
+      }
+      
+      logger.info('Cleaned up event processor');
+    } catch (error) {
+      logger.error('Error during event processor cleanup', error);
+    }
+  }
+  
+  process.exit(0);
+});
+
 const httpsOptions = {
   key: fs.readFileSync('./certs/localhost-key.pem'),
   cert: fs.readFileSync('./certs/localhost.pem')
 };
 
-// Handle shutdown gracefully
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down...');
-  // Add any cleanup needed for eventProcessor
-  process.exit(0);
-});
-
-// Start the event processor
-/* initializeEventProcessor().catch(error => {
-  console.error('Failed to init EventProcessor:', error);
-  process.exit(1);
-}); */
-
-const PORT = process.env.SERVER_PORT || 3001;
-const server = https.createServer(httpsOptions, app).listen(PORT, () => {
-  console.log(`HTTPS Server running on port ${PORT}`);
-});
+initializeEventProcessing()
+  .then(() => {
+    const PORT = process.env.SERVER_PORT || 3001;
+    const server = https.createServer(httpsOptions, app).listen(PORT, () => {
+      logger.info(`HTTPS Server running on port ${PORT}`);
+    });
+  })
+  .catch(error => {
+    logger.error('Failed to start server:', error);
+    process.exit(1);
+  });
