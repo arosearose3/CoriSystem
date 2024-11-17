@@ -1,63 +1,78 @@
 // routes/eventRoutes.js
 import express from 'express';
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
+
 
 export function createEventRoutes(eventProcessor, logger) {
-  router.post('/webhook/*', async (req, res) => {
-    try {
-      if (!eventProcessor?.initialized) {
-        throw new Error('Event processor not initialized');
-      }
-      
-      const path = req.path;
-      const payload = req.body;
-      
-      logger.info('Received webhook event', {
-        path,
-        contentType: req.headers['content-type']
-      });
+  if (!eventProcessor) {
+    logger.error('Attempted to create routes with null event processor');
+    throw new Error('Event processor is required');
+  }
 
-      await eventProcessor.handleWebhook(path, payload, req.headers);
-      res.status(204).send();
-    } catch (error) {
-      logger.error('Error processing webhook', error);
-      res.status(error.message.startsWith('Unknown webhook path:') ? 404 : 500)
-         .json({ error: error.message });
-    }
+  const router = express.Router({ mergeParams: true });
+
+  router.use((req, res, next) => {
+    logger.info('Event route request', {
+      originalUrl: req.originalUrl,
+      basePath: BASE_PATH,
+      path: req.path,
+      method: req.method,
+      // List actual registered paths instead of using wildcard
+    //  registeredWebhookPaths: Array.from(eventProcessor.webhookEvents.keys())
+    });
+    next();
   });
 
-  router.post('/fhir-changed', async (req, res) => {
-    try {
-      if (!eventProcessor?.initialized) {
-        throw new Error('Event processor not initialized');
-      }
+ 
 
-      const event = req.body;
-      logger.info('Received FHIR change event', {
-        resourceType: event.resourceType,
-        operation: event.operation
+  // Webhook handler with full error handling and path normalization
+  router.post('/webhook/:path(*)', async (req, res) => {
+    try {
+      const webhookPath = `/webhook/${req.params.path}`;
+      
+      logger.info('Processing webhook', {
+        webhookPath,
+        registeredWebhooks: Array.from(eventProcessor.webhookEvents.keys())
       });
 
-      await eventProcessor.handleFhirChange(event);
+      // Check if webhook exists
+      const eventInfo = eventProcessor.webhookEvents.get(webhookPath);
+      if (!eventInfo) {
+        return res.status(404).json({
+          error: 'Unknown webhook path',
+          received: webhookPath,
+          available: Array.from(eventProcessor.webhookEvents.keys())
+        });
+      }
+
+      // Validate content type
+      const contentType = req.headers['content-type'];
+      if (!contentType || !eventInfo.endpointInfo.mimeTypes.includes(contentType)) {
+        return res.status(400).json({
+          error: 'Invalid or missing content-type',
+          received: contentType || 'none',
+          expected: eventInfo.endpointInfo.mimeTypes
+        });
+      }
+
+      // Process webhook
+      await eventProcessor.handleWebhook(webhookPath, req.body, req.headers);
       res.status(204).send();
+
     } catch (error) {
-      logger.error('Error processing FHIR change', error);
+      logger.error('Webhook processing failed', {
+        error: error.message,
+        stack: error.stack
+      });
       res.status(500).json({ error: error.message });
     }
   });
 
+
+  // Timer events
   router.post('/timer/push', async (req, res) => {
     try {
-      if (!eventProcessor?.initialized) {
-        throw new Error('Event processor not initialized');
-      }
-
-      const message = req.body.message;
-      logger.info('Received Timer message', {
-        subscription: message.attributes?.subscription
-      });
-
-      await eventProcessor.handleTimerEvent(message);
+      await eventProcessor.handleTimerEvent(req.body.message);
       res.status(204).send();
     } catch (error) {
       logger.error('Error processing Timer message', error);
@@ -65,20 +80,12 @@ export function createEventRoutes(eventProcessor, logger) {
     }
   });
 
+  // Health check endpoint
   router.get('/health', (req, res) => {
-    if (!eventProcessor?.initialized) {
-      return res.status(503).json({
-        status: 'unavailable',
-        message: 'Event processor not initialized'
-      });
-    }
-
-    res.json({
+    res.status(200).json({
       status: 'healthy',
-      fhirEventTypes: Array.from(eventProcessor.fhirChangeEvents.keys()),
-      timerSchedules: Array.from(eventProcessor.timerEvents.keys()),
-      webhookPaths: Array.from(eventProcessor.webhookEvents.keys()),
-      uptime: process.uptime()
+      webhooks: Array.from(eventProcessor.webhookEvents.keys()),
+      initialized: eventProcessor.initialized
     });
   });
 

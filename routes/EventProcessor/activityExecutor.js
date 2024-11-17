@@ -1,131 +1,184 @@
-
-// activityExecutor.js
 export class ActivityExecutor {
-    constructor({ callFhirApi, logger }) {
-      this.callFhirApi = callFhirApi;
-      this.logger = logger;
-      
-      // Track active executions
-      this.activeExecutions = new Map();
-      
-      // Activity type handlers
-      this.handlers = {
-        'notify': this.handleNotification.bind(this),
-        'update': this.handleUpdate.bind(this),
-        'create': this.handleCreate.bind(this),
-        'email': this.handleEmail.bind(this)
-      };
+  constructor({ callFhirApi, logger }) {
+    this.callFhirApi = callFhirApi;
+    this.logger = logger;
+    this.activityDefinitions = new Map();
+    this.initialized = false;
+    this.activeExecutions = new Map(); // Track running executions
+  }
+
+  getActiveExecutions() {
+    return Array.from(this.activeExecutions.values());
+  }
+
+  async cancelExecution(executionId) {
+    const execution = this.activeExecutions.get(executionId);
+    if (execution) {
+      execution.status = 'cancelled';
+      this.logger.info('Cancelled execution', { executionId });
+      this.activeExecutions.delete(executionId);
     }
+  }
+
+  async initialize() {
+    try {
+      await this.loadActivityDefinitions();
+      this.initialized = true;
+      this.logger.info('ActivityExecutor initialized', {
+        definitionsLoaded: this.activityDefinitions.size
+      });
+    } catch (error) {
+      this.logger.error('ActivityExecutor initialization failed:', error);
+      throw error;
+    }
+  }
+
+
+  async loadActivityDefinitions() {
+    try {
+      const response = await this.callFhirApi('GET', 'ActivityDefinition?status=active');
+      const definitions = response.entry?.map(e => e.resource) || [];
+      
+      this.logger.info('Found activity definitions', { 
+        total: definitions.length
+      });
   
-    async execute({ activityRef, planId, triggerEvent, eventData, author }) {
-      try {
-        this.logger.info('Starting activity execution', {
-          activityRef,
-          planId,
-          triggerId: triggerEvent.name
-        });
-  
-        // Track execution
-        const executionId = `${planId}-${Date.now()}`;
-        this.activeExecutions.set(executionId, {
-          startTime: new Date(),
-          activityRef,
-          planId,
-          status: 'running'
-        });
-  
-        // Get activity definition
-        const activityDef = await this.callFhirApi(
-          'GET', 
-          `/${activityRef}`
-        );
-  
-        // Determine activity type from definition
-        const activityType = activityDef.type?.coding?.[0]?.code || 'unknown';
-        
-        // Get appropriate handler
-        const handler = this.handlers[activityType];
-        if (!handler) {
-          throw new Error(`No handler for activity type: ${activityType}`);
+      for (const definition of definitions) {
+        // Skip templates
+        if (definition.usage === 'combine-activity-template') {
+          this.logger.debug('Skipping template activity', {
+            id: definition.id,
+            name: definition.name
+          });
+          continue;
         }
   
-        // Execute activity
-        const result = await handler({
-          definition: activityDef,
-          eventData,
+        // Skip if no dynamicValue or no endpoint
+        const endpoint = definition.dynamicValue?.find(dv => dv.path === 'endpoint')?.expression?.expression;
+        if (!endpoint) {
+          this.logger.debug('Skipping activity - no endpoint defined', {
+            id: definition.id,
+            name: definition.name
+          });
+          continue;
+        }
+  
+        this.activityDefinitions.set(definition.id, {
+          definition: definition,
+          endpoint: endpoint,
+          lastUpdated: definition.meta?.lastUpdated
+        });
+  
+        this.logger.info('Loaded activity definition', {
+          id: definition.id,
+          name: definition.name,
+          endpoint: endpoint
+        });
+      }
+  
+      this.logger.info('ActivityExecutor initialized', {
+        definitionsLoaded: this.activityDefinitions.size
+      });
+  
+    } catch (error) {
+      this.logger.error('Failed to load activity definitions:', error);
+      throw error;
+    }
+  }
+
+ async execute({ activityRef, planId, triggerEvent, eventData, author }) {
+  console.log ("in execute triggerEvent: ", triggerEvent);
+    if (!this.initialized) {
+      throw new Error('ActivityExecutor not initialized');
+    }
+
+    const executionId = `exec-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    try {
+      const execution = {
+        id: executionId,
+        activityRef,
+        planId,
+        status: 'running',
+        startTime: new Date(),
+        triggerEvent
+      };
+
+      this.activeExecutions.set(executionId, execution);
+      this.logger.info('Starting activity execution', { executionId, activityRef, planId });
+
+      const cachedDef = this.activityDefinitions.get(activityRef);
+      if (!cachedDef) {
+        throw new Error(`Activity definition not found: ${activityRef}`);
+      }
+
+      const result = await fetch(cachedDef.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          ...eventData,
+          planId,
           author,
           executionId
-        });
-  
-        // Update execution status
-        this.activeExecutions.set(executionId, {
-          ...this.activeExecutions.get(executionId),
-          status: 'completed',
-          endTime: new Date(),
-          result
-        });
-  
-        this.logger.info('Activity execution completed', {
-          executionId,
-          activityRef,
-          planId
-        });
-  
-        return result;
-  
-      } catch (error) {
-        this.logger.error('Activity execution failed', {
-          error,
-          activityRef,
-          planId
-        });
-        throw error;
+        })
+      });
+
+      if (!result.ok) {
+        throw new Error(`Activity execution failed: ${result.status} ${result.statusText}`);
       }
-    }
-  
-    // Stub handlers for different activity types
-    async handleNotification({ definition, eventData, author, executionId }) {
-      this.logger.info('Executing notification activity', { executionId });
-      // Stub: Would implement notification logic here
-      return { status: 'sent' };
-    }
-  
-    async handleUpdate({ definition, eventData, author, executionId }) {
-      this.logger.info('Executing update activity', { executionId });
-      // Stub: Would implement resource update logic here
-      return { status: 'updated' };
-    }
-  
-    async handleCreate({ definition, eventData, author, executionId }) {
-      this.logger.info('Executing create activity', { executionId });
-      // Stub: Would implement resource creation logic here
-      return { status: 'created' };
-    }
-  
-    async handleEmail({ definition, eventData, author, executionId }) {
-      this.logger.info('Executing email activity', { executionId });
-      // Stub: Would implement email sending logic here
-      return { status: 'sent' };
-    }
-  
-    // Utility methods
-    getActiveExecutions() {
-      return Array.from(this.activeExecutions.entries()).map(([id, execution]) => ({
-        id,
-        ...execution
-      }));
-    }
-  
-    getExecutionStatus(executionId) {
-      return this.activeExecutions.get(executionId);
-    }
-  
-    cancelExecution(executionId) {
-      const execution = this.activeExecutions.get(executionId);
-      if (execution && execution.status === 'running') {
-        execution.status = 'cancelled';
+
+      execution.status = 'completed';
+      execution.endTime = new Date();
+      execution.result = await result.json();
+
+      this.logger.info('Activity execution completed', { executionId });
+      return execution.result;
+
+    } catch (error) {
+      this.logger.error('Activity execution failed', {
+        executionId,
+        error: error.message,
+        stack: error.stack
+      });
+
+      if (this.activeExecutions.has(executionId)) {
+        const execution = this.activeExecutions.get(executionId);
+        execution.status = 'failed';
+        execution.error = error.message;
         execution.endTime = new Date();
-        this.logger.info('Activity execution cancelled', { executionId });
+      }
+
+      throw error;
+
+    } finally {
+      // Keep failed executions for a short time for inspection
+      if (this.activeExecutions.has(executionId)) {
+        const execution = this.activeExecutions.get(executionId);
+        if (execution.status === 'completed') {
+          this.activeExecutions.delete(executionId);
+        } else {
+          // Clean up failed executions after a delay
+          setTimeout(() => {
+            this.activeExecutions.delete(executionId);
+          }, 5 * 60 * 1000); // Keep for 5 minutes
+        }
       }
     }
   }
+
+  // Add cleanup method for shutdown
+  async cleanup() {
+    this.logger.info('Cleaning up activity executor', {
+      activeExecutions: this.activeExecutions.size
+    });
+
+    // Cancel all active executions
+    for (const [executionId, execution] of this.activeExecutions) {
+      await this.cancelExecution(executionId);
+    }
+
+    this.logger.info('Activity executor cleanup complete');
+  }
+}

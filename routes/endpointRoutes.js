@@ -26,7 +26,9 @@ router.post('/create', async (req, res) => {
   }
 
   const endpointData = req.body;
+  delete endpointData.nameplus; 
 
+  console.log ("endpointRoutes endpointData:", endpointData);
   try {
     const createdEndpoint = await service_createEndpoint(endpointData);
     res.status(201).json({ message: 'Endpoint created successfully', data: createdEndpoint });

@@ -3,243 +3,293 @@ export class EventProcessor {
     this.callFhirApi = callFhirApi;
     this.activityExecutor = activityExecutor;
     this.logger = logger;
-    
-    this.fhirChangeEvents = new Map();
-    this.timerEvents = new Map();
+
+    // Storage for configurations
     this.webhookEvents = new Map();
+    this.timerEvents = new Map();
+    this.fhirChangeEvents = new Map();
+    this.registeredPlans = new Map();
+
     this.initialized = false;
-    this.initializationError = null;
+    this.wsManager = null;
+  }
+
+  setWebSocketManager(wsManager) {
+    this.wsManager = wsManager;
+    this.logger.info('WebSocket manager configured');
   }
 
   async initialize() {
+    if (this.initialized) {
+      this.logger.warn('EventProcessor already initialized');
+      return;
+    }
+
     try {
-      await this.loadEndpoints();
+      this.logger.info('Starting EventProcessor initialization');
+
+      // Load all configurations independently
+      await Promise.all([
+        this.loadEndpoints(),
+        this.loadEventTemplates(),
+        this.loadPlans()
+      ]);
+
       this.initialized = true;
-      this.logger.info('EventProcessor initialized successfully');
+      this.logger.info('EventProcessor initialization complete', {
+        webhookEvents: this.webhookEvents.size,
+        timerEvents: this.timerEvents.size,
+        fhirChangeEvents: this.fhirChangeEvents.size,
+        plans: this.registeredPlans.size
+      });
     } catch (error) {
-      this.initializationError = error;
+      this.initialized = false;
       this.logger.error('EventProcessor initialization failed:', error);
       throw error;
     }
   }
 
   async loadEndpoints() {
-    console.log ('loadEndpoints');
     try {
-      const response = await this.callFhirApi('GET', 'Endpoint?status=active', {
-        params: {
-          status: 'active'
-        }
-      });
+      this.logger.info('Loading webhook endpoints');
+      const response = await this.callFhirApi('GET', 'Endpoint?status=active');
+      
+      if (!response.entry) {
+        this.logger.info('No webhook endpoints found');
+        return;
+      }
 
-      const endpoints = response.entry?.map(e => e.resource) || [];
-      console.log ('endpoints', endpoints);
-
-      for (const endpoint of endpoints) {
-        if (endpoint.address && endpoint.address.startsWith('http://cori.system')) {
-          const path = endpoint.address.replace('http://cori.system', '');
+      for (const entry of response.entry) {
+        const endpoint = entry.resource;
+        if (endpoint.address?.startsWith('http://cori.system')) {
+          const fullPath = endpoint.address.replace('http://cori.system', '');
+          const path = fullPath.replace('/event/webhook/', '/webhook/');
+          
           this.webhookEvents.set(path, {
             registrations: [],
             endpointInfo: {
               id: endpoint.id,
               name: endpoint.name,
               mimeTypes: endpoint.payloadMimeType || ['application/json'],
-              status: endpoint.status
+              status: endpoint.status,
+              originalAddress: endpoint.address
             }
           });
           
-          this.logger.info(`Loaded endpoint ${endpoint.name}`, {
+          this.logger.info(`Registered webhook endpoint: ${endpoint.name}`, {
             path,
             id: endpoint.id
           });
         }
       }
-
-      this.logger.info(`Loaded ${this.webhookEvents.size} endpoints`);
     } catch (error) {
-      this.logger.error('Failed to load endpoints:', error);
+      this.logger.error('Failed to load webhook endpoints:', error);
       throw error;
     }
   }
 
-  async registerPlan(plan) {
+  async loadEventTemplates() {
     try {
-      const trigger = plan.action[0]?.trigger?.[0];
-      if (!trigger) {
-        this.logger.warn(`Plan ${plan.id} has no trigger defined`);
+      this.logger.info('Loading event templates');
+      const response = await this.callFhirApi('GET', 'Basic?code=event-template');
+      
+      if (!response.entry) {
+        this.logger.info('No event templates found');
         return;
       }
 
-      const eventTemplate = await this.callFhirApi(
-        'GET',
-        `/Basic/${trigger.name}`
-      );
+      for (const entry of response.entry) {
+        const template = entry.resource;
+        const config = this.extractEventConfig(template);
+        
+        if (!config.type) continue;
 
-      const config = this.extractEventConfig(eventTemplate);
+        switch (config.type) {
+          case 'timer':
+            if (config.schedule) {
+              this.timerEvents.set(config.schedule, {
+                id: template.id,
+                name: config.name,
+                schedule: config.schedule,
+                timeZone: config.timeZone
+              });
+              this.logger.info(`Registered timer event: ${config.name}`);
+            }
+            break;
 
-      const registration = {
-        planId: plan.id,
-        triggerEvent: {
-          name: trigger.name,
-          type: trigger.type,
-          config
-        },
-        activities: plan.action.slice(1).map(a => a.definitionCanonical),
-        author: plan.author?.reference
-      };
-
-      switch (config.type) {
-        case 'data-changed':
-          this.registerFhirChangeEvent(config.resourceType, registration);
-          break;
-        case 'timer':
-          this.registerTimerEvent(config.schedule, registration);
-          break;
-        case 'webhook':
-          const endpointPath = Array.from(this.webhookEvents.entries())
-            .find(([_, value]) => value.endpointInfo.name === config.endpointName)?.[0];
-          
-          if (endpointPath) {
-            const eventInfo = this.webhookEvents.get(endpointPath);
-            eventInfo.registrations.push(registration);
-            this.logger.info(`Registered webhook event for path ${endpointPath}`);
-          } else {
-            this.logger.warn(`No matching endpoint found for ${config.endpointName}`);
-          }
-          break;
+          case 'data-changed':
+            if (config.resourceType) {
+              if (!this.fhirChangeEvents.has(config.resourceType)) {
+                this.fhirChangeEvents.set(config.resourceType, []);
+              }
+              this.fhirChangeEvents.get(config.resourceType).push({
+                id: template.id,
+                name: config.name,
+                operation: config.operation
+              });
+              this.logger.info(`Registered FHIR change event: ${config.name}`);
+            }
+            break;
+        }
       }
     } catch (error) {
-      this.logger.error(`Failed to register plan ${plan.id}:`, error);
+      this.logger.error('Failed to load event templates:', error);
+      throw error;
     }
   }
 
-  registerFhirChangeEvent(resourceType, registration) {
-    if (!this.fhirChangeEvents.has(resourceType)) {
-      this.fhirChangeEvents.set(resourceType, []);
+  async loadPlans() {
+    try {
+      this.logger.info('Loading plans');
+      const response = await this.callFhirApi('GET', 'PlanDefinition?status=active');
+      
+      if (!response.entry) {
+        this.logger.info('No plans found');
+        return;
+      }
+
+      for (const entry of response.entry) {
+        const plan = entry.resource;
+        this.registeredPlans.set(plan.id, plan);
+      }
+
+      this.logger.info(`Loaded ${this.registeredPlans.size} plans`);
+    } catch (error) {
+      this.logger.error('Failed to load plans:', error);
+      throw error;
     }
-    this.fhirChangeEvents.get(resourceType).push(registration);
-    this.logger.info(`Registered FHIR change event for ${resourceType}`);
   }
 
-  registerTimerEvent(schedule, registration) {
-    if (!this.timerEvents.has(schedule)) {
-      this.timerEvents.set(schedule, []);
-    }
-    this.timerEvents.get(schedule).push(registration);
-    this.logger.info(`Registered Timer event for schedule ${schedule}`);
-  }
-
+  // Event handlers
   async handleWebhook(path, payload, headers) {
-    if (!this.initialized) {
-      throw new Error('EventProcessor not initialized');
-    }
+    if (!this.initialized) throw new Error('EventProcessor not initialized');
 
     const eventInfo = this.webhookEvents.get(path);
     if (!eventInfo) {
       throw new Error(`Unknown webhook path: ${path}`);
     }
 
-    this.logger.info(`Processing webhook event for path ${path}`);
+    const eventId = `webhook-${Date.now()}`;
+    const matchingPlans = this.findMatchingPlans('webhook', path);
 
-    const { registrations, endpointInfo } = eventInfo;
-
-    if (registrations.length === 0) {
-      this.logger.warn(`No registrations found for webhook path: ${path}`);
-      return;
-    }
-
-    for (const registration of registrations) {
-      if (endpointInfo.mimeTypes.length > 0) {
-        const contentType = headers['content-type'] || 'application/json';
-        if (!endpointInfo.mimeTypes.some(mime => contentType.startsWith(mime))) {
-          this.logger.warn(`Invalid content type ${contentType} for endpoint ${endpointInfo.name}`);
-          continue;
-        }
+    for (const plan of matchingPlans) {
+      try {
+        await this.executePlan(plan, {
+          type: 'webhook',
+          path,
+          payload,
+          headers,
+          eventId
+        });
+      } catch (error) {
+        this.logger.error(`Failed to execute plan ${plan.id}:`, error);
       }
-
-      await this.executeActivities(registration, {
-        type: 'webhook',
-        path,
-        payload,
-        endpointId: endpointInfo.id,
-        endpointName: endpointInfo.name,
-        timestamp: new Date().toISOString(),
-        headers
-      });
     }
   }
 
   async handleFhirChange(event) {
-    if (!this.initialized) {
-      throw new Error('EventProcessor not initialized');
-    }
+    if (!this.initialized) throw new Error('EventProcessor not initialized');
 
-    const registrations = this.fhirChangeEvents.get(event.resourceType) || [];
-    this.logger.info(`Processing FHIR change event for ${event.resourceType}`);
+    const eventId = `fhir-${Date.now()}`;
+    const matchingPlans = this.findMatchingPlans('data-changed', event.resourceType);
 
-    for (const registration of registrations) {
-      if (this.shouldProcessFhirEvent(registration, event)) {
-        await this.executeActivities(registration, event);
+    for (const plan of matchingPlans) {
+      try {
+        await this.executePlan(plan, {
+          type: 'data-changed',
+          resourceType: event.resourceType,
+          operation: event.operation,
+          resource: event.resource,
+          eventId
+        });
+      } catch (error) {
+        this.logger.error(`Failed to execute plan ${plan.id}:`, error);
       }
     }
   }
 
-  async handleTimerEvent(message) {
-    if (!this.initialized) {
-      throw new Error('EventProcessor not initialized');
-    }
+  async handleTimerEvent(schedule, message) {
+    if (!this.initialized) throw new Error('EventProcessor not initialized');
 
-    const schedule = message.attributes?.subscription;
-    if (!schedule) {
-      this.logger.warn('Timer message missing subscription', message);
-      return;
-    }
+    const eventId = `timer-${Date.now()}`;
+    const matchingPlans = this.findMatchingPlans('timer', schedule);
 
-    const registrations = this.timerEvents.get(schedule) || [];
-    this.logger.info(`Processing Timer event for schedule ${schedule}`);
-
-    for (const registration of registrations) {
-      await this.executeActivities(registration, {
-        type: 'timer',
-        schedule,
-        message: message.data,
-        attributes: message.attributes,
-        publishTime: message.publishTime
-      });
+    for (const plan of matchingPlans) {
+      try {
+        await this.executePlan(plan, {
+          type: 'timer',
+          schedule,
+          message,
+          eventId
+        });
+      } catch (error) {
+        this.logger.error(`Failed to execute plan ${plan.id}:`, error);
+      }
     }
   }
 
-  shouldProcessFhirEvent(registration, event) {
-    const config = registration.triggerEvent.config;
-    return !config.operation || config.operation === event.operation;
+  // Helper methods
+  findMatchingPlans(eventType, eventKey) {
+    const matchingPlans = [];
+
+    for (const plan of this.registeredPlans.values()) {
+      const trigger = plan.action?.[0]?.trigger?.[0];
+      if (!trigger) continue;
+
+      switch (eventType) {
+        case 'webhook':
+          if (this.webhookEvents.get(eventKey)?.endpointInfo?.name === trigger.name) {
+            matchingPlans.push(plan);
+          }
+          break;
+
+        case 'timer':
+          if (this.timerEvents.has(eventKey) && 
+              this.timerEvents.get(eventKey).id === trigger.name) {
+            matchingPlans.push(plan);
+          }
+          break;
+
+        case 'data-changed':
+          const changes = this.fhirChangeEvents.get(eventKey) || [];
+          if (changes.some(change => change.id === trigger.name)) {
+            matchingPlans.push(plan);
+          }
+          break;
+      }
+    }
+
+    return matchingPlans;
   }
 
-  async executeActivities(registration, eventData) {
-    try {
-      this.logger.info(`Executing activities for plan ${registration.planId}`);
-      
-      for (const activityRef of registration.activities) {
+  async executePlan(plan, eventData) {
+    const activities = plan.action.slice(1).map(a => a.definitionCanonical);
+    
+    for (const activityRef of activities) {
+      try {
         await this.activityExecutor.execute({
           activityRef,
-          planId: registration.planId,
-          triggerEvent: registration.triggerEvent,
+          planId: plan.id,
           eventData,
-          author: registration.author
+          author: plan.author?.reference
         });
+      } catch (error) {
+        this.logger.error(`Failed to execute activity ${activityRef}:`, error);
+        throw error;
       }
-    } catch (error) {
-      this.logger.error(`Failed to execute activities for plan ${registration.planId}:`, error);
     }
   }
 
-  extractEventConfig(eventTemplate) {
-    const mainExtension = eventTemplate.extension?.[0]?.extension || [];
+  extractEventConfig(template) {
+    const mainExtension = template.extension?.[0]?.extension || [];
     return {
+      name: mainExtension.find(e => e.url === 'name')?.valueString,
+      description: mainExtension.find(e => e.url === 'description')?.valueString,
       type: mainExtension.find(e => e.url === 'type')?.valueString,
-      resourceType: mainExtension.find(e => e.url === 'resourceType')?.valueString,
-      operation: mainExtension.find(e => e.url === 'operation')?.valueString,
       schedule: mainExtension.find(e => e.url === 'schedule')?.valueString,
-      endpointName: mainExtension.find(e => e.url === 'endpointName')?.valueString
+      timeZone: mainExtension.find(e => e.url === 'timeZone')?.valueString,
+      resourceType: mainExtension.find(e => e.url === 'resourceType')?.valueString,
+      operation: mainExtension.find(e => e.url === 'operation')?.valueString
     };
   }
 }

@@ -22,6 +22,7 @@ import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.
 import api211Routes from './routes/api211Routes.js';
 import availabilityRoutes from './routes/availabilityRoutes.js';
 import conditionRoutes from './routes/conditionRoutes.js';
+import communicationRoutes from './routes/communicationRoutes.js';
 import consentRoutes from './routes/consentRoutes.js';
 import emailRoutes from './routes/emailRoutes.js';
 import exclusionRoutes from './routes/exclusionRoutes.js';
@@ -48,6 +49,9 @@ import templatePlanRoutes from './routes/templatePlanRoutes.js';
 import endpointRoutes from './routes/endpointRoutes.js'; 
 
 
+import { WebSocketManager } from './serverutils/webSocketServer.js';
+
+
 import { getFhirAccessToken} from './src/lib/auth/auth.js';
 import { auth, healthcare, BASE_PATH,PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID, handleBlobResponse } from './serverutils.js';
 
@@ -59,6 +63,7 @@ const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_I
 
 
 const app = express();
+let eventProcessor = null; // Declare at module level
 
 const logger = createLogger({
   service: 'cori-server',
@@ -100,18 +105,7 @@ const activityExecutor = new ActivityExecutor({
   logger
 });
 
-let eventProcessor = null;
 
-async function initializeEventProcessing() {
-  try {
-    eventProcessor = new EventProcessor(callFhirApi, activityExecutor, logger);
-    await eventProcessor.initialize();
-    logger.info('Event processor initialized successfully');
-  } catch (error) {
-    logger.error('Failed to initialize event processor', error);
-    throw error;
-  }
-}
 
 
 
@@ -131,18 +125,24 @@ app.use(cors({
 app.use(express.json());
 app.use(express.static('public'));
 
-/* app.use((req, res, next) => {
-  console.log('Route called:', req.method, req.url);
-  next();
-}); */
+
+  app.use((err, req, res, next) => {
+  logger.error('Express error:', err);
+  next(err);
+});
+
 
 app.use((req, res, next) => {
-  console.log('Incoming request:', {
-    method: req.method,
-    url: req.url,
+  logger.info('Raw request:', {
+  //  originalUrl: req.originalUrl,
+  //  basePath: BASE_PATH,
+    // Remove the hardcoded wildcard path
+    // fullPath: `${BASE_PATH}/events/webhook/*`,
+    // Instead, log actual request details:
     path: req.path,
- //   basePath: BASE_PATH,
- //   fullPath: `${BASE_PATH}${req.path}`
+    method: req.method,
+  //  registeredWebhooks: eventProcessor?.webhookEvents ? 
+  //    Array.from(eventProcessor.webhookEvents.keys()) : []
   });
   next();
 });
@@ -414,13 +414,17 @@ app.use(`${BASE_PATH}/api/templates/events`, templateEventRoutes);
 app.use(`${BASE_PATH}/api/templates/plans`, templatePlanRoutes);
 
 app.use(`${BASE_PATH}/api/webhook`, endpointRoutes);
+app.use(`${BASE_PATH}/api/communication`, communicationRoutes);
 
-app.use(`${BASE_PATH}/events`, createEventRoutes(eventProcessor, logger));
+
 
 app.post(`${BASE_PATH}/`, (req, res) => {
   console.log('responding with 200 to $BASE_PATH/', req.body);
   res.status(200).send();
 });
+
+
+
 
 app.post("/", (req, res) => {
   console.log('responding with 200 to post./ ', req.body);
@@ -434,42 +438,189 @@ app.use((req, res, next) => {
 
 
 
-// Handle shutdown gracefully
-process.on('SIGTERM', async () => {
-  logger.info('SIGTERM received, initiating shutdown');
-  
-  if (eventProcessor) {
-    try {
-      // Cancel any active executions
-      const activeExecutions = eventProcessor.activityExecutor.getActiveExecutions();
-      for (const execution of activeExecutions) {
-        if (execution.status === 'running') {
-          eventProcessor.activityExecutor.cancelExecution(execution.id);
-        }
-      }
-      
-      logger.info('Cleaned up event processor');
-    } catch (error) {
-      logger.error('Error during event processor cleanup', error);
-    }
-  }
-  
-  process.exit(0);
-});
 
-const httpsOptions = {
-  key: fs.readFileSync('./certs/localhost-key.pem'),
-  cert: fs.readFileSync('./certs/localhost.pem')
-};
-
-initializeEventProcessing()
-  .then(() => {
-    const PORT = process.env.SERVER_PORT || 3001;
-    const server = https.createServer(httpsOptions, app).listen(PORT, () => {
-      logger.info(`HTTPS Server running on port ${PORT}`);
+async function initializeEventProcessing() {
+  try {
+    logger.info('Starting event processor initialization');
+    
+    eventProcessor = new EventProcessor(callFhirApi, activityExecutor, logger);
+    logger.info('Event processor instance created');
+    
+    await eventProcessor.initialize();
+    logger.info('Event processor initialized ', {
+      webhookEvents: eventProcessor.webhookEvents.size,
+   //   registeredPaths: Array.from(eventProcessor.webhookEvents.keys())
     });
+
+    const httpsOptions = {
+      key: fs.readFileSync('./certs/localhost-key.pem'),
+      cert: fs.readFileSync('./certs/localhost.pem')
+    };
+    
+    const PORT = process.env.SERVER_PORT || 3001;
+    logger.info(`Creating HTTPS server on port ${PORT}`);
+    
+    const server = https.createServer(httpsOptions, app);
+    
+    // Initialize WebSocket manager
+    logger.info('Initializing WebSocket manager');
+    const wsManager = new WebSocketManager(server, logger);
+    app.locals.wsManager = wsManager;
+    
+    // Configure event processor with WebSocket manager
+    logger.info('Configuring WebSocket manager for event processor');
+    eventProcessor.setWebSocketManager(wsManager);
+
+    logger.info('Webhook registrations:', {
+      paths: Array.from(eventProcessor.webhookEvents.keys()),
+      details: Array.from(eventProcessor.webhookEvents.entries()).map(([path, info]) => ({
+        path,
+        name: info.endpointInfo.name,
+        mimeTypes: info.endpointInfo.mimeTypes
+      }))
+    });
+
+    return server;
+  } catch (error) {
+    logger.error('Failed to initialize event processor:', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+}
+
+async function startServer() {
+  try {
+    logger.info('Starting server initialization');
+    
+    // 1. Initialize activity executor
+    logger.info('Initializing activity executor');
+    await activityExecutor.initialize();
+    logger.info('Activity executor initialized successfully');
+    
+    // 2. Initialize event processing
+    const server = await initializeEventProcessing();
+    
+    // 3. Verify initialization
+    if (!eventProcessor?.initialized) {
+      throw new Error('Event processor initialization failed');
+    }
+
+    // 4. Set up event routes AFTER eventProcessor is initialized
+    logger.info('Setting up event routes with initialized processor');
+
+    app.use(`${BASE_PATH}/events`, (req, res, next) => {
+      logger.info('Events middleware hit:', {
+        originalUrl: req.originalUrl,
+        basePath: BASE_PATH,
+        path: req.path,
+        method: req.method,
+        registeredWebhooks: eventProcessor?.webhookEvents ? 
+          Array.from(eventProcessor.webhookEvents.keys()) : []
+      });
+      next();
+    }, createEventRoutes(eventProcessor, logger));
+    
+    // Start server
+    const PORT = process.env.SERVER_PORT || 3001;
+    await new Promise((resolve, reject) => {
+      server.listen(PORT, (err) => {
+        if (err) {
+          logger.error('Server listen error:', err);
+          reject(err);
+        } else {
+          logger.info(`HTTPS Server running on port ${PORT}`, {
+            eventProcessorState: {
+              initialized: eventProcessor.initialized,
+              webhookCount: eventProcessor.webhookEvents.size,
+              registeredPaths: Array.from(eventProcessor.webhookEvents.keys())
+            }
+          });
+          resolve();
+        }
+      });
+    });
+
+    return server; // Return server instance
+  } catch (error) {
+    logger.error('Unhandled error during server startup:', {
+      error: error.message,
+      stack: error.stack
+    });
+    throw error;
+  }
+}
+
+    // Setup orderly shutdown handler
+    process.on('SIGTERM', async () => {
+      logger.info('SIGTERM received, initiating shutdown');
+      try {
+        if (eventProcessor) {
+          // Get active executions
+          const activeExecutions = eventProcessor.activityExecutor.getActiveExecutions();
+          logger.info(`Cleaning up ${activeExecutions.length} active executions`);
+          
+          // Cleanup activity executor
+          await eventProcessor.activityExecutor.cleanup();
+          
+          // Close WebSocket connections
+          if (eventProcessor.wsManager) {
+            const clientCount = eventProcessor.wsManager.wss.clients.size;
+            logger.info(`Closing ${clientCount} WebSocket connections`);
+            eventProcessor.wsManager.wss.clients.forEach(client => {
+              client.close(1000, 'Server shutting down');
+            });
+          }
+        }
+    
+        // Close server
+        if (server) {
+          await new Promise((resolve, reject) => {
+            server.close((err) => {
+              if (err) {
+                logger.error('Error closing server:', err);
+                reject(err);
+              } else {
+                logger.info('Server closed successfully');
+                resolve();
+              }
+            });
+          });
+        }
+    
+      } catch (error) {
+        logger.error('Error during cleanup:', {
+          error: error.message,
+          stack: error.stack
+        });
+      } finally {
+        logger.info('Shutdown complete');
+        process.exit(0);
+      }
+    });
+    
+    process.on('SIGINT', () => {
+      logger.info('SIGINT received');
+      process.emit('SIGTERM');
+    });
+
+// Make sure to export the eventProcessor if needed
+// Export eventProcessor
+export { eventProcessor };
+
+// Start the server
+let server;
+startServer()
+  .then(s => {
+    server = s;
   })
   .catch(error => {
-    logger.error('Failed to start server:', error);
+    logger.error('Unhandled error during server startup:', {
+      error: error.message,
+      stack: error.stack
+    });
     process.exit(1);
   });
+
+  

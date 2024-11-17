@@ -132,7 +132,14 @@ export const navItems = [
     roles: ['admin'], 
 
   },
-  
+  {
+    labelKey: 'UITest',
+    icon: '⚙️',
+    path: `${base}/sandbox`,
+    subject: 'Referral UItest',
+    roles: ['admin'], 
+
+  },
 /*   {
     label: 'Consents',
     icon: '✅',
@@ -148,14 +155,15 @@ export const navItems = [
     subject: 'Organization Search',
     roles: ['admin'],
   },
-/*   {
-    label: 'Notifications',
+   {
+    label: 'Communication',
     icon: '🔔',
-    path: `${base}/notifications`,
-    subject: 'Notifications',
+    path: `${base}/communication`,
+    subject: 'Communication',
     roles: ['client','orgadmin', 'admin', 'provider'],
 
   },
+  /*
   {
     label: 'Messages',
     icon: '✉️',

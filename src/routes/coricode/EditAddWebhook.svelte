@@ -10,8 +10,15 @@
   // Auto-generate address when name changes with full URL
   $: formData.address = formData.name ? 
     `http://cori.system/event/webhook/${formData.name}` : '';
+
+  $: {
+   if (!isEditMode && formData.name) {
+     formData.nameplus = `${formData.name}-${generateRandomString(6)}`;
+   }
+ }
+
   
-    let formData = {
+  let formData = {
     resourceType: "Endpoint",
     text: {
       status: "generated",
@@ -24,6 +31,7 @@
       display: "FHIR REST"
     },
     name: "",
+    nameplus: "",
     address: "",
     // Updated payload type structure
     payloadType: [{
@@ -77,8 +85,7 @@
   async function handleSubmit() {
     try {
       if (!isEditMode) {
-        const generatedSuffix = generateRandomString(6);
-        formData.name = `${formData.name}-${generatedSuffix}`;
+        formData.name = formData.nameplus;
         formData.address = `http://cori.system/event/webhook/${formData.name}`;
       }
 
@@ -89,7 +96,7 @@
       } else {
         await createWebhook(formData);
       }
-      dispatch('save');
+      dispatch('save', { uniqueEndpointPath:formData.nameplus  });
     } catch (error) {
       console.error("Failed to submit webhook:", error);
       alert("Failed to submit webhook: " + error.message);
@@ -133,7 +140,7 @@
     />
     {#if !isEditMode}
       <div class="text-sm text-gray-600">
-        Generated Name Preview: {formData.name}-{generateRandomString(6)}
+        Generated Name Preview: {formData.nameplus}
       </div>
     {/if}
   </div>
@@ -221,6 +228,7 @@
   <div class="flex gap-4 pt-4">
     <button 
       type="submit"
+      on:click={handleSubmit}
       class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
     >
       {isEditMode ? 'Update' : 'Create'} Webhook

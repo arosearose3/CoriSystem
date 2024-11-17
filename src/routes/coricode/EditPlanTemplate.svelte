@@ -15,41 +15,54 @@
   let title = template.title || '';
   let description = template.description || '';
   let actions = template.action || [
-      {
-          trigger: [
-              {
-                  type: 'named-event',
-                  name: ''
-              }
-          ]
-      }
+    {
+      trigger: [{ type: 'named-event', name: '' }]
+    }
   ];
 
   // Available templates
   let eventTemplates = [];
+  let webhookEndpoints = [];
   let activityTemplates = [];
   let isLoading = true;
   let selectedEventTemplateId = actions[0]?.trigger[0]?.name || '';
 
   onMount(async () => {
-      try {
-          // Load event templates
-          const eventResponse = await fetch('/api/templates/events/all');
-          if (!eventResponse.ok) throw new Error('Failed to load event templates');
-          const rawEventTemplates = await eventResponse.json();
-          eventTemplates = processEventTemplates(rawEventTemplates);
+    try {
+      const [eventResponse, webhookResponse, activityResponse] = await Promise.all([
+        fetch('/api/templates/events/all'),
+        fetch('/api/webhook/all'),
+        fetch('/api/templates/activities/all')
+      ]);
 
-          // Load activity templates
-          const activityResponse = await fetch('/api/templates/activities/all');
-          if (!activityResponse.ok) throw new Error('Failed to load activity templates');
-          activityTemplates = await activityResponse.json();
-
-          isLoading = false;
-      } catch (error) {
-          console.error('Error loading templates:', error);
-          errorMessage = 'Failed to load templates. Please try again.';
-          isLoading = false;
+      if (!eventResponse.ok || !webhookResponse.ok || !activityResponse.ok) {
+        throw new Error('Failed to load templates');
       }
+
+      const rawEventTemplates = await eventResponse.json();
+      const webhooks = await webhookResponse.json();
+      
+      // Process standard event templates
+      eventTemplates = processEventTemplates(rawEventTemplates);
+      
+      // Add webhook endpoints as event options
+      webhookEndpoints = webhooks.entry?.map(e => e.resource).map(endpoint => ({
+        id: endpoint.id,
+        name: endpoint.name,
+        type: 'named-event',
+        displayName: `Webhook: ${endpoint.name}`
+      })) || [];
+      
+      // Combine both types of events
+      eventTemplates = [...eventTemplates, ...webhookEndpoints];
+      
+      activityTemplates = await activityResponse.json();
+      isLoading = false;
+    } catch (error) {
+      console.error('Error loading templates:', error);
+      errorMessage = 'Failed to load templates. Please try again.';
+      isLoading = false;
+    }
   });
 
   function processEventTemplates(rawTemplates) {
@@ -71,36 +84,34 @@
     const selectedEventTemplate = eventTemplates.find(et => et.id === selectedEventTemplateId);
     
     const resource = {
-        resourceType: 'PlanDefinition',
-        name,
-        title,
-        description,
-        status: 'active',
-        usage: 'cori-plan-template',
-        action: []
+      resourceType: 'PlanDefinition',
+      name,
+      title,
+      description,
+      status: 'active',
+      usage: 'cori-plan-template',
+      action: []
     };
 
     if (selectedEventTemplate) {
-        resource.action.push({
-            trigger: [
-                {
-                    type: 'named-event',
-                    name: selectedEventTemplate.id
-                }
-            ]
-        });
+      resource.action.push({
+        trigger: [{
+          type: selectedEventTemplate.type === 'webhook-event' ? 'webhook-event' : 'named-event',
+          name: selectedEventTemplate.id
+        }]
+      });
     }
 
     const activityActions = actions
-        .slice(1)
-        .filter(action => action.definitionCanonical)
-        .map(action => ({
-            definitionCanonical: action.definitionCanonical
-        }));
+      .slice(1)
+      .filter(action => action.definitionCanonical)
+      .map(action => ({
+        definitionCanonical: action.definitionCanonical
+      }));
 
     resource.action.push(...activityActions);
     return resource;
-}
+  }
 
   function updatePreview() {
       previewResource = createFhirResource();
