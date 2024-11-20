@@ -104,12 +104,12 @@
       }
     }
   
-    /**
-     * Fetches details of a practitioner by their ID.
-     * @param {string} practitionerId - The ID of the practitioner.
-     * @returns {Object} - An object containing the practitioner's name, birthDate, NPI, SMS, and email.
-     */
-     async function fetchPractitionerDetails(practitionerId) {
+/**
+ * Fetches details of a practitioner by their ID.
+ * @param {string} practitionerId - The ID of the practitioner.
+ * @returns {Object} - An object containing the practitioner's name, birthDate, NPI, SMS, and email.
+ */
+  async function fetchPractitionerDetails(practitionerId) {
   try {
     const response = await fetch(`${base}/api/practitioner/${practitionerId}`);
     const practitioner = await response.json(); // Directly get the practitioner resource
@@ -163,7 +163,8 @@
 }
     async function fetchInviteCode(pId) {
     try {
-      const response = await fetch(`${base}/api/practitioner/getCodeByPractitionerId?practitionerId=${pId}`);
+      const response = await fetch(`${base}/api/invite/practitioner/${pId}/inviteCode`);
+      
       if (!response.ok) {
         throw new Error(`Error: ${response.status} ${response.statusText}`);
       }

@@ -1,7 +1,7 @@
-export const UserCodes = [
+[
   {
     "code": "znbfmzjvq",
-    "practitionerId":  "6a6a6313-3cf8-4ac7-a7eb-1b51ecb7e474"
+    "practitionerId": "6a6a6313-3cf8-4ac7-a7eb-1b51ecb7e474"
   },
   {
     "code": "knbfmzjvq",
@@ -2410,5 +2410,56 @@ export const UserCodes = [
   {
     "code": "iu0q869fc",
     "practitionerId": "feb40138-4c17-4159-8106-c3bbc0a9b970"
+  },
+  {
+    "code": "o4xutg5ec"
+  },
+  {
+    "code": "3ubsn5zt8",
+    "practitionerId": "23f85e15-911c-4859-927f-87de84397028"
+  },
+  {
+    "code": "o3o36pccn",
+    "practitionerId": "64d78aed-48a8-4c4d-91d4-4f4b9f622ae0"
+  },
+  {
+    "code": "3mtegaa32",
+    "practitionerId": "004d306f-55ca-4f19-83ad-58dc9940dfb3"
+  },
+  {
+    "code": "ywo9rh56n",
+    "practitionerId": "cfb9b74b-dbdd-49e8-b81d-0dfea7c5c0bf"
+  },
+  {
+    "code": "xkxnjb6wn",
+    "practitionerId": "b56a10da-767a-44f5-a01f-501cbcb86b55"
+  },
+  {
+    "code": "tp6scfjy3",
+    "practitionerId": "0a8173a3-2a62-4d2d-b915-81c17a1b7d6e"
+  },
+  {
+    "code": "3w34dsez4",
+    "practitionerId": "2b7c5fc9-0810-4f78-b653-263a6bdf3534"
+  },
+  {
+    "code": "k6rxeai3f",
+    "practitionerId": "e2f757d8-5ea9-43c3-a33a-437233bfc5fc"
+  },
+  {
+    "code": "qisg27jg5",
+    "practitionerId": "08ec985c-0bd3-4eb3-8e80-32c8a1b3205d"
+  },
+  {
+    "code": "tqv0ycw5f",
+    "practitionerId": "f7f6126e-4b20-4634-a595-1612f740722d"
+  },
+  {
+    "code": "6wgt7sqqv",
+    "practitionerId": "154d67ca-8376-433e-8bd3-315b55190041"
+  },
+  {
+    "code": "n3n05zuru",
+    "practitionerId": "16497db2-d011-4c95-811c-46aac122f265"
   }
-];
+]

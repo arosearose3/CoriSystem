@@ -138,24 +138,76 @@ export class EventProcessor {
     }
   }
 
+  getPlansDebugInfo() {
+    // Debug logging to check Map state
+   // console.log('Debug - Raw Map:', this.registeredPlans);
+   // console.log('Debug - Map size:', this.registeredPlans.size);
+   // console.log('Debug - Map keys:', Array.from(this.registeredPlans.keys()));
+    
+    // Check the structure of the first plan if any exist
+    if (this.registeredPlans.size > 0) {
+      const firstKey = Array.from(this.registeredPlans.keys())[0];
+    //  console.log('Debug - Sample plan structure:', this.registeredPlans.get(firstKey));
+    }
+  
+    const plansArray = Array.from(this.registeredPlans.entries());
+    //console.log('Debug - Plans array:', plansArray);
+  
+    return {
+      count: this.registeredPlans.size,
+      plans: plansArray.map(([id, plan]) => {
+        // Log each plan's transformation
+    //    console.log('Debug - Processing plan:', { id, plan });
+        return {
+          id,
+          title: plan?.title || 'Untitled',
+          status: plan?.status || 'unknown',
+          version: plan?.version
+        };
+      })
+    };
+  }
+  
   async loadPlans() {
     try {
       this.logger.info('Loading plans');
       const response = await this.callFhirApi('GET', 'PlanDefinition?status=active');
       
+      // Log the raw response
+      //console.log('Debug - Raw FHIR response:', response);
+      
       if (!response.entry) {
         this.logger.info('No plans found');
         return;
       }
-
+  
+      // Log entry count
+      //console.log('Debug - Number of entries:', response.entry.length);
+  
+      this.registeredPlans.clear();
+      
       for (const entry of response.entry) {
         const plan = entry.resource;
+        // Log each plan before storing
+       // console.log('Debug - Adding plan:', { id: plan.id, plan });
         this.registeredPlans.set(plan.id, plan);
       }
-
-      this.logger.info(`Loaded ${this.registeredPlans.size} plans`);
+  
+      // Log Map state after population
+/*   //    console.log('Debug - Map after population:', {
+        size: this.registeredPlans.size,
+        keys: Array.from(this.registeredPlans.keys())
+      }); */
+  
+      const plansInfo = this.getPlansDebugInfo();
+      this.logger.info('Plans loaded successfully:', plansInfo?.count);
+    //  console.log('Loaded plans debug info:', plansInfo);
+  
     } catch (error) {
-      this.logger.error('Failed to load plans:', error);
+      this.logger.error('Failed to load plans:', {
+        error: error.message,
+        stack: error.stack
+      });
       throw error;
     }
   }
@@ -170,8 +222,10 @@ export class EventProcessor {
     }
 
     const eventId = `webhook-${Date.now()}`;
+ //   console.log ("eventProc handleWebhook, before findMatchingPlans");
     const matchingPlans = this.findMatchingPlans('webhook', path);
 
+ //   console.log ("eventProc handleWebhook,findMatchingPlans:", matchingPlans);
     for (const plan of matchingPlans) {
       try {
         await this.executePlan(plan, {
@@ -230,51 +284,135 @@ export class EventProcessor {
 
   // Helper methods
   findMatchingPlans(eventType, eventKey) {
+
+/*  //   console.log("Debug - Webhook Events Map:", {
+      eventKey,
+      webhookInfo: this.webhookEvents.get(eventKey),
+      allWebhooks: Array.from(this.webhookEvents.entries()).map(([key, info]) => ({
+        key,
+        name: info.endpointInfo.name,
+        info: JSON.stringify(info.endpointInfo)
+      }))
+    }); */
+
+
+/*   //  console.log("eventProc findMatchingPlans:", {
+      eventType,
+      eventKey,
+      plansCount: this.registeredPlans.size,
+      planIds: Array.from(this.registeredPlans.keys())
+    }); */
+  
     const matchingPlans = [];
-
+    
+    // Debug the plans we're iterating through
+/*   //  console.log("Available plans:", Array.from(this.registeredPlans.entries()).map(([id, plan]) => ({
+      id,
+      triggerName: plan.action?.[0]?.trigger?.[0]?.name,
+      title: plan.title
+    }))); */
+  
     for (const plan of this.registeredPlans.values()) {
+      // Debug each plan as we process it
+/*    //   console.log("Processing plan:", {
+        id: plan.id,
+        title: plan.title,
+        hasAction: !!plan.action,
+        actionCount: plan.action?.length,
+        triggerName: plan.action?.[0]?.trigger?.[0]?.name
+      }); */
+  
       const trigger = plan.action?.[0]?.trigger?.[0];
-      if (!trigger) continue;
-
+      if (!trigger) {
+    //    console.log(`Skipping plan ${plan.id} - no trigger found`);
+        continue;
+      }
+  
+      let isMatch = false;
       switch (eventType) {
         case 'webhook':
-          if (this.webhookEvents.get(eventKey)?.endpointInfo?.name === trigger.name) {
-            matchingPlans.push(plan);
+          const webhookInfo = this.webhookEvents.get(eventKey);
+/*       //    console.log("Webhook comparison:", {
+            planTriggerName: trigger.name,
+            webhookName: webhookInfo?.endpointInfo?.name,
+            isMatch: webhookInfo?.endpointInfo?.name === trigger.name
+          }); */
+          if (webhookInfo?.endpointInfo?.id === trigger.name) {
+            isMatch = true;
           }
           break;
-
+  
         case 'timer':
-          if (this.timerEvents.has(eventKey) && 
-              this.timerEvents.get(eventKey).id === trigger.name) {
-            matchingPlans.push(plan);
+          const timerInfo = this.timerEvents.get(eventKey);
+/*      //     console.log("Timer comparison:", {
+            planTriggerName: trigger.name,
+            timerId: timerInfo?.id,
+            isMatch: timerInfo?.id === trigger.name
+          }); */
+          if (timerInfo?.id === trigger.name) {
+            isMatch = true;
           }
           break;
-
+  
         case 'data-changed':
           const changes = this.fhirChangeEvents.get(eventKey) || [];
+/*       //    console.log("Data change comparison:", {
+            planTriggerName: trigger.name,
+            changes: changes.map(c => c.id),
+            hasMatch: changes.some(change => change.id === trigger.name)
+          }); */
           if (changes.some(change => change.id === trigger.name)) {
-            matchingPlans.push(plan);
+            isMatch = true;
           }
           break;
       }
+  
+      if (isMatch) {
+    //    console.log(`Match found for plan ${plan.id}`);
+        matchingPlans.push(plan);
+      }
     }
-
+  
+    console.log("Matching plans found:", matchingPlans.map(p => ({
+      id: p.id,
+      title: p.title
+    })));
+  
     return matchingPlans;
   }
 
   async executePlan(plan, eventData) {
+    console.log("executePlan params:", {
+      planId: plan.id,
+      planTitle: plan.title,
+      eventDataPath: eventData?.path
+    });
+  
+    // Get trigger information from first action
+    const triggerAction = plan.action[0];
+    const triggerEvent = {
+      type: triggerAction?.trigger?.[0]?.type,
+      name: triggerAction?.trigger?.[0]?.name
+    };
+  
+    // Get activities from remaining actions
     const activities = plan.action.slice(1).map(a => a.definitionCanonical);
-    
+  
     for (const activityRef of activities) {
       try {
         await this.activityExecutor.execute({
           activityRef,
           planId: plan.id,
+          triggerEvent,  // Pass the trigger event info
           eventData,
           author: plan.author?.reference
         });
       } catch (error) {
-        this.logger.error(`Failed to execute activity ${activityRef}:`, error);
+        this.logger.error(`Failed to execute activity ${activityRef}:`, {
+          error: error.message,
+          planId: plan.id,
+          activityRef
+        });
         throw error;
       }
     }

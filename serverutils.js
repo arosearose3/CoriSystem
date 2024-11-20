@@ -2,6 +2,11 @@ import { google } from 'googleapis';
 import { GoogleAuth } from 'google-auth-library';
 import dotenv from 'dotenv';
 
+// services/routeServices.js
+import fetch from 'node-fetch';
+import { OAuth2Client } from 'google-auth-library';
+import passport from 'passport';
+
 dotenv.config(); // Load environment variables from .env file
 
 export const PROJECT_ID = process.env.PROJECT_ID;
@@ -86,3 +91,220 @@ export const handleBlobResponse = async (responseData) => {
     throw new Error('Unexpected response type');
   }
 };
+
+
+
+
+export class RouteServices {
+  constructor(logger, BASE_PATH, oauth2Client) {
+    this.logger = logger;
+    this.BASE_PATH = BASE_PATH;
+    this.oauth2Client = oauth2Client;
+  }
+
+  // Authentication Services
+  async verifyGoogleToken(token) {
+    const url = `https://oauth2.googleapis.com/tokeninfo?access_token=${token}`;
+    const response = await fetch(url);
+    return response.ok;
+  }
+
+  async verifyFacebookToken(token) {
+    const url = `https://graph.facebook.com/me?access_token=${token}`;
+    const response = await fetch(url);
+    this.logger.debug('Facebook token verification response:', response);
+    return response.ok;
+  }
+
+  async handleGoogleCallback(code, req) {
+    const { tokens } = await this.oauth2Client.getToken(code);
+    this.oauth2Client.setCredentials(tokens);
+
+    const userInfo = await this.oauth2Client.request({
+      url: 'https://www.googleapis.com/oauth2/v3/userinfo'
+    });
+
+    const user = {
+      id: userInfo.data.sub,
+      email: userInfo.data.email,
+      name: userInfo.data.name,
+      picture: userInfo.data.picture,
+    };
+
+    req.session.user = user;
+    req.session.googleToken = tokens.access_token;
+
+    return user;
+  }
+
+  async handleLogout(req) {
+    const tasks = [];
+
+    if (req.session.googleToken) {
+      tasks.push(this.revokeGoogleToken(req.session.googleToken));
+    }
+
+    if (req.session.fbToken) {
+      tasks.push(this.revokeFacebookToken(req.session.fbToken));
+    }
+
+    await Promise.all(tasks);
+    return new Promise((resolve, reject) => {
+      req.session.destroy(err => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  async revokeGoogleToken(token) {
+    const url = `https://oauth2.googleapis.com/revoke?token=${token}`;
+    const response = await fetch(url, { method: 'POST' });
+    if (!response.ok) {
+      throw new Error('Failed to revoke Google token');
+    }
+  }
+
+  async revokeFacebookToken(token) {
+    const url = `https://graph.facebook.com/me/permissions?access_token=${token}`;
+    await fetch(url, { method: 'DELETE' });
+  }
+
+  // SMS Services
+  async sendSMS(phoneNumber, message, twilioClient) {
+    if (!message || !phoneNumber) {
+      throw new Error('Message and phone number are required');
+    }
+
+    return await twilioClient.messages.create({
+      body: message,
+      messagingServiceSid: process.env.TWILIO_MESSAGING_SERVICE_SID,
+      to: phoneNumber
+    });
+  }
+
+  // Middleware Functions
+  logEventRequest(req, res, next) {
+    this.logger.info('Event route accessed', {
+      request: {
+        url: req.originalUrl,
+        path: req.path,
+        method: req.method
+      },
+      routing: {
+        basePath: this.BASE_PATH
+      }
+    });
+    next();
+  }
+
+  shouldLogPath(path) {
+    const excludePaths = [
+      '_app/immutable',
+      '_app/version.json',
+      'favicon.ico',
+      'robots.txt',
+      '.js',
+      '.css',
+      '.map'
+    ];
+    
+    return !excludePaths.some(excludePath => path.includes(excludePath));
+  }
+  
+  logRequest(req, res, next) {
+    // Skip logging for immutable app paths
+/*     if (!req.path.includes('_app/immutable')) {
+      this.logger.info('Raw request:', {
+        path: req.path,
+        method: req.method
+      }); 
+    }*/
+    if (this.shouldLogPath(req.path)) {
+      this.logger.debug('Request received', {  // Changed to debug level
+        path: req.path,
+        method: req.method
+      });
+    }
+    next();
+  }
+
+  handleError(err, req, res, next) {
+    this.logger.error('Express error:', err);
+    next(err);
+  }
+
+  // Route Setup Helpers
+  setupAuthRoutes(app) {
+    app.get(`${this.BASE_PATH}/auth/google/url`, (req, res) => {
+      const redirectUri = `${process.env.CLIENT_URL}${this.BASE_PATH}/auth/google/callback`;
+      const url = this.oauth2Client.generateAuthUrl({
+        access_type: 'offline',
+        scope: [
+          'https://www.googleapis.com/auth/userinfo.profile',
+          'https://www.googleapis.com/auth/userinfo.email',
+        ],
+        redirect_uri: redirectUri,
+      });
+      res.redirect(url);
+    });
+
+    app.get(`${this.BASE_PATH}/auth/google/callback`, async (req, res) => {
+      try {
+        await this.handleGoogleCallback(req.query.code, req);
+        res.redirect(`${process.env.CLIENT_URL}${this.BASE_PATH}/`);
+      } catch (error) {
+        this.logger.error('Google authentication error:', error);
+        res.status(500).send('Authentication failed');
+      }
+    });
+
+    app.get(`${this.BASE_PATH}/auth/facebook/url`, 
+      passport.authenticate('facebook', { scope: ['email'] }));
+
+    app.get(`${this.BASE_PATH}/auth/facebook/callback`,
+      passport.authenticate('facebook', { failureRedirect: '/' }),
+      (req, res) => {
+        res.redirect(`${process.env.CLIENT_URL}${this.BASE_PATH}`);
+      });
+
+    // User auth status endpoint
+    app.get(`${this.BASE_PATH}/auth/user`, async (req, res) => {
+      const googleToken = req.session.googleToken;
+      const facebookToken = req.user?.fbToken;
+      
+      try {
+        const isGoogleValid = googleToken ? await this.verifyGoogleToken(googleToken) : false;
+        const isFacebookValid = facebookToken ? await this.verifyFacebookToken(facebookToken) : false;
+
+        if (!isGoogleValid && !isFacebookValid) {
+          return res.status(401).json({ error: 'Not authenticated' });
+        }
+
+        const user = isGoogleValid ? req.session.user : req.user;
+        res.json({ user });
+      } catch (error) {
+        this.logger.error('Token verification error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      }
+    });
+
+    // Logout endpoint
+    app.post(`${this.BASE_PATH}/auth/logout`, async (req, res) => {
+      try {
+        await this.handleLogout(req);
+        res.clearCookie('connect.sid');
+        res.json({ success: true });
+      } catch (error) {
+        this.logger.error('Logout error:', error);
+        res.status(500).json({ error: 'Logout failed' });
+      }
+    });
+  }
+
+  setupAPIRoutes(app, routes) {
+    Object.entries(routes).forEach(([path, router]) => {
+      app.use(`${this.BASE_PATH}/api/${path}`, router);
+    });
+  }
+}

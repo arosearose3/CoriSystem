@@ -126,7 +126,7 @@
   // Helper function to find the Admin invite code using org ID
   async function findInviteCode(orgId) {
     try {
-      const response = await fetch(`${base}/api/organization//getCodeByOrganizationId?organizationId=${orgId}`);
+      const response = await fetch(`${base}/api/invite/organization/${orgId}/inviteCode`);
       const data = await response.json();
       return data.code || 'No code found';
     } catch (error) {

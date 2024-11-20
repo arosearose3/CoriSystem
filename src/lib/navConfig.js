@@ -2,20 +2,7 @@ import { base } from '$app/paths'; // Import the base path
 //import { t } from '$lib/i18n'; // Import the translation function
 
 export const navItems = [
-/*   {
-    label: 'Clients',
-    icon: '⚙️',
-    path: `${base}/clients/provider`,
-    subject: 'Provider Clients',
-    roles: ['provider'], // Accessible by provider 
-  }, */
-/*   {
-    label: 'Organization Clients',
-    icon: '⚙️',
-    path: `${base}/clients/orgadmin`,
-    subject: 'Organization Clients',
-    roles: ['orgadmin'], // Accessible by orgadmin and admin roles
-  }, */
+
   {
     labelKey: 'coriHelpdesk',
     icon: '☎',
@@ -25,19 +12,27 @@ export const navItems = [
     roles: ['provider','client','referrer','orgadmin','admin'], // Accessible only by admin
   },
   {
+    labelKey: 'invites',
+    icon: '☎',
+    path: `${base}/invites`,
+    subject: 'Manage Invites',
+    roles: [ 'admin'], 
+  },
+  {
+    labelKey: 'allComms',
+    icon: '☎',
+    path: `${base}/admin/communication`,
+    subject: 'AllComms',
+    roles: [ 'admin'], 
+  },
+  {
     labelKey: 'allCoriClients',
     icon: '⚙️',
     path: `${base}/clients/admin`,
     subject: 'Cori Clients',
     roles: ['admin'], // Accessible only by admin
   },
-/*   {
-    label: 'Clients',
-    icon: '⚙️',
-    path: `${base}/client`,
-    subject: 'Organization Clients',
-    roles: ['orgadmin'], 
-  }, */
+
   {
     labelKey: 'staffAvailability',
     icon: '⚙️',
@@ -140,14 +135,7 @@ export const navItems = [
     roles: ['admin'], 
 
   },
-/*   {
-    label: 'Consents',
-    icon: '✅',
-    path: `${base}/consents`,
-    subject: 'Consents',
-    roles: ['client', 'provider', 'orgadmin','admin'],
 
-  }, */
   {
     labelKey: 'searchForServices',
     icon: '🔍',
@@ -156,36 +144,20 @@ export const navItems = [
     roles: ['admin'],
   },
    {
-    label: 'Communication',
+    labelKey: 'Communication',
     icon: '🔔',
     path: `${base}/communication`,
     subject: 'Communication',
     roles: ['client','orgadmin', 'admin', 'provider'],
 
   },
-  /*
-  {
-    label: 'Messages',
-    icon: '✉️',
-    path: `${base}/messages`,
-    subject: 'Messages',
-    roles: ['client', 'provider','orgadmin', 'admin'],
-  }, */
   {
     labelKey: 'capacityAndAvailability',
     icon: '✉️',
     path: `${base}/capacity`,
     subject: 'Capacity',
-    roles: ['provider', 'admin'], // Accessible by provider and admin roles
+    roles: ['provider', 'admin'], 
   },
 
-/*   {
-    label: 'Referrals',
-    icon: '📄',
-    path: `${base}/referrals`,
-    subject: 'Referrals',
-    roles: ['client', 'provider','org admin', 'admin'],
-
-  }, */
 
 ];

@@ -14,18 +14,20 @@ const logger = createLogger({
 });
 
 // Middleware to check authentication
-const requireAuth = (req, res, next) => {
-  if (!req.session?.user) {
+ const requireAuth = (req, res, next) => {
+/*   if (!req.session?.user) {
     return res.status(401).json({ error: 'Unauthorized' });
-  }
+  } */
   next();
 };
-
+ 
 // Helper function to make FHIR API calls
-async function callFhirApi(method, path, data = null, params = null) {
+async function callFhirApi_comms(method, pathstring, data = null, params = null) {
+  console.log ("callFhirApi:", method, pathstring, data, params);
+
   try {
     const accessToken = await getFhirAccessToken();
-    const url = `${FHIR_BASE_URL}/${path}`;
+    const url = `${FHIR_BASE_URL}/${pathstring}`;
     
     const config = {
       method,
@@ -45,6 +47,8 @@ async function callFhirApi(method, path, data = null, params = null) {
       config.data = data;
     }
 
+    console.log ("callFhir  config :", JSON.stringify(config));
+
     const response = await axios(config);
     return response.data;
   } catch (error) {
@@ -57,53 +61,62 @@ async function callFhirApi(method, path, data = null, params = null) {
   }
 }
 
-// GET /api/communication
-// Fetch communications for the current user
-router.get('/', requireAuth, async (req, res) => {
+
+router.get('/allcomms', requireAuth, async (req, res) => {
+  console.log ('in comm/all ');
   try {
-    const userId = req.session.user.id;
-    const params = new URLSearchParams();
+    // Fetch all Communication resources
 
-    // Base search parameters
-    params.append('_sort', '-sent');
+    try {
+      const accessToken = await getFhirAccessToken();
+ //     const url = `${FHIR_BASE_URL}/Communication?_sort=-sent`;
+      const url = `${FHIR_BASE_URL}/Communication`;
+
+      console.log("communication/all url:", url);
+      // Configuration for the GET request
+      const config = {
+        method: 'GET',
+        url,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/fhir+json',
+          Accept: 'application/fhir+json',
+        },
+    //    ...(params && { params }), // Add params only if they exist
+      };
     
-    // Add recipient filter
-    if (req.query.recipient) {
-      params.append('recipient', req.query.recipient);
-    } else {
-      // Default to current user if no recipient specified
-      params.append('recipient', userId);
+      console.log("comm/all config:", JSON.stringify(config));
+    
+      const response = await axios(config);
+    
+      // Log the number of resources retrieved
+      logger.info(`Fetched ${response.data.total || 0} communications`);
+    
+      // Return the resources
+      res.json(response.data);
+    } catch (error) {
+      logger.error('Failed to fetch communications', error);
+      res.status(500).json({ 
+        error: 'Failed to fetch communications',
+        details: error.message,
+      });
     }
 
-    // Add any additional query parameters
-    if (req.query.status) {
-      params.append('status', req.query.status);
-    }
-
-    if (req.query._count) {
-      params.append('_count', req.query._count);
-    }
-
-    const response = await callFhirApi(
-      'GET', 
-      `Communication?${params.toString()}`
-    );
-
-    res.json(response);
   } catch (error) {
-    logger.error('Failed to fetch communications', error);
+    logger.error('Failed to fetch all communications', error);
     res.status(500).json({ 
-      error: 'Failed to fetch communications',
+      error: 'Failed to fetch all communications',
       details: error.message 
     });
   }
 });
 
+
 // POST /api/communication
 // Create a new communication
 router.post('/', requireAuth, async (req, res) => {
   try {
-    const userId = req.session.user.id;
+  //  const userId = req.session.user.id;
     const communication = {
       resourceType: 'Communication',
       status: 'completed',
@@ -114,6 +127,7 @@ router.post('/', requireAuth, async (req, res) => {
       }
     };
 
+    console.log ("communicationRoute-POST :", JSON.stringify(communication));
     // Validate required fields
     if (!communication.recipient?.[0]?.reference) {
       return res.status(400).json({ error: 'Recipient is required' });
@@ -123,7 +137,7 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Message content is required' });
     }
 
-    const result = await callFhirApi('POST', 'Communication', communication);
+    const result = await callFhirApi_comms('POST', 'Communication', communication);
 
     // If WebSocket server is available, notify recipient
     if (req.app.locals.wsManager) {
@@ -149,7 +163,7 @@ router.post('/', requireAuth, async (req, res) => {
 // Get a specific communication
 router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const result = await callFhirApi('GET', `Communication/${req.params.id}`);
+    const result = await callFhirApi_comms('GET', `Communication/${req.params.id}`);
 
     // Check if user has permission to view this communication
     const userId = req.session.user.id;
@@ -177,7 +191,7 @@ router.get('/:id', requireAuth, async (req, res) => {
 router.patch('/:id', requireAuth, async (req, res) => {
   try {
     // First, get the current communication
-    const current = await callFhirApi('GET', `Communication/${req.params.id}`);
+    const current = await callFhirApi_comms('GET', `Communication/${req.params.id}`);
     
     // Check if user is the recipient
     const userId = req.session.user.id;
@@ -197,7 +211,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
     };
 
     // Update the communication
-    const result = await callFhirApi(
+    const result = await callFhirApi_comms(
       'PUT', 
       `Communication/${req.params.id}`, 
       updated
@@ -215,20 +229,20 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
 // DELETE /api/communication/:id
 // Delete a communication
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/delete/:id', requireAuth, async (req, res) => {
   try {
     // First, get the current communication
-    const current = await callFhirApi('GET', `Communication/${req.params.id}`);
+    const current = await callFhirApi_comms('GET', `Communication/${req.params.id}`);
     
     // Check if user is the sender
-    const userId = req.session.user.id;
-    const isSender = current.sender?.reference === `Practitioner/${userId}`;
+ //   const userId = req.session.user.id;
+ //   const isSender = current.sender?.reference === `Practitioner/${userId}`;
 
-    if (!isSender) {
+/*     if (!isSender) {
       return res.status(403).json({ error: 'Forbidden' });
-    }
+    } */
 
-    await callFhirApi('DELETE', `Communication/${req.params.id}`);
+    await callFhirApi_comms('DELETE', `Communication/${req.params.id}`);
     res.status(204).send();
   } catch (error) {
     logger.error('Failed to delete communication', error);
@@ -250,7 +264,7 @@ router.get('/unread/count', requireAuth, async (req, res) => {
       _summary: 'count'
     });
 
-    const response = await callFhirApi(
+    const response = await callFhirApi_comms(
       'GET',
       `Communication?${params.toString()}`
     );
@@ -265,4 +279,51 @@ router.get('/unread/count', requireAuth, async (req, res) => {
   }
 });
 
+
+// GET /api/communication
+// Fetch communications for the current user
+router.get('/', requireAuth, async (req, res) => {
+  console.log ("communicationRoute-GET query:", JSON.stringify(req.query));
+  console.log ("communicationRoute-GET session:", JSON.stringify(req.session));
+  try {
+   // const userId = req.session.user.id;
+    const params = new URLSearchParams();
+
+    console.log ("communicationRoute-GET query:", JSON.stringify(req.query));
+    console.log ("communicationRoute-GET session:", JSON.stringify(req.session));
+
+    // Base search parameters
+    params.append('_sort', '-sent');
+    
+    // Add recipient filter
+    if (req.query.recipient) {
+      params.append('recipient', req.query.recipient);
+    } else {
+      // Default to current user if no recipient specified
+      params.append('recipient', userId);
+    }
+
+    // Add any additional query parameters
+    if (req.query.status) {
+      params.append('status', req.query.status);
+    }
+
+    if (req.query._count) {
+      params.append('_count', req.query._count);
+    }
+
+    const response = await callFhirApi_comms(
+      'GET', 
+      `Communication?${params.toString()}`
+    );
+
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to fetch communications', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch communications',
+      details: error.message 
+    });
+  }
+});
 export default router;

@@ -13,8 +13,6 @@ import { service_addPractitioner} from './practitionerService.js';
 import { service_deletePractitionerAndRoles} from './practitionerService.js';
 import { service_deletePractitioner} from './practitionerService.js';
 
-import { UserCodes } from './userCodes.js'; //all the invite codes for Oct 2024 users
-import { UserAdminCodes } from './userAdminCodes.js'; //all the invite codes for Oct 2024 users
 
 
 import { BASE_PATH } from '../serverutils.js'; // Adjust the path as necessary
@@ -26,7 +24,7 @@ const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_I
 
 // Add this endpoint to practitionerRoutes.js
 
-router.get('/getCodeByPractitionerId', async (req, res) => {
+router.get('/getCodeByPractitionerIdOld', async (req, res) => {
   const { practitionerId } = req.query;
   if (!practitionerId) {
       return res.status(400).json({
@@ -232,7 +230,7 @@ router.get('/getBatch1CodeByPractitionerId', (req, res) => {
   return res.json({ code: found.code });
 });
 
-router.get('/getBatch1AdminCodeByOrganizationId', (req, res) => {
+router.get('/getBatch1AdminCodeByOrganizationIdOld', (req, res) => {
   const { orgId } = req.query;
   if (!orgId) {
     return res.status(400).json({ error: 'organizationId is required' });
@@ -277,7 +275,7 @@ router.get('/getAllIds', async (req, res) => {
 router.post('/updateEmailFromCode', async (req, res) => {
   const { code, email, namestring } = req.body;
 
-  console.log ("/updateEmailFromCode endpoint namestring:", namestring);
+  console.log ("updateEmailFromCode endpoint namestring:", namestring, email, code);
   if (!code || !email) {
     return res.status(400).json({ error: 'Code and email are required.' });
   }
@@ -362,13 +360,9 @@ router.get('/findWithEmail', async (req, res) => {
 });
 
 
-
 router.post('/add', async (req, res) => {
-
-
   try {
     const practitionerResult = await service_addPractitioner(req.body);
-    
     res.status(201).json({ 
       message: 'Practitioner added successfully', 
       practitionerID: practitionerResult.id 
@@ -442,7 +436,7 @@ router.get('/all', async (req, res) => {
 
       // Process the current page of practitioners
       const currentPagePractitioners = await handleBlobResponse(response.data);
-      console.log ("Pract route currentPagePract:",JSON.stringify(currentPagePractitioners));
+    //  console.log ("Pract route currentPagePract:",JSON.stringify(currentPagePractitioners));
 
       allPractitioners = [...allPractitioners, ...currentPagePractitioners.entry];
 

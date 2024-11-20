@@ -16,7 +16,7 @@
 
 </script>
 
-<h4>Oct 27, 2024</h4>
+<h4>Nov 19, 2024</h4>
 
 {#if currentLang === 'en'}
   <p>Email andy@combinebh.org for tech support</p>

@@ -15,7 +15,7 @@ const metadataFilePath = path.join(__dirname, './exclusionUploadFileData.json');
 
 
 // Email endpoint
-router.post('/email', async (req, res) => {
+router.post('/create', async (req, res) => {
   const { to, subject, html } = req.body;
   
   const transporter = nodemailer.createTransport({
@@ -47,4 +47,40 @@ router.post('/email', async (req, res) => {
   }
 });
   
+// Email endpoint
+router.post('/', async (req, res) => {
+  const { to, subject, html } = req.body;
+
+ 
+  
+  const transporter = nodemailer.createTransport({
+    host: 'email7412.luxsci.com',
+    port: 587,
+    secure: false,
+    auth: {
+      user: 'andrewroselpc@elig.pro',
+      pass: process.env.LUXSCIPW
+    }
+  });
+  
+  const mailOptions = {
+    from: 'andrewroselpc@elig.pro',
+    to,
+    subject,
+    html,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8'
+    }
+  };
+  
+  try {
+    await transporter.sendMail(mailOptions);
+    res.json({ message: 'Email sent successfully' });
+  } catch (error) {
+    console.error('Email error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
   export default router;

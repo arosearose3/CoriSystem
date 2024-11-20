@@ -70,8 +70,8 @@ router.put('/update', async (req, res) => {
   }
 });
 
-router.delete('/delete', async (req, res) => {
-  const { id } = req.query;
+router.delete('/delete/:id', async (req, res) => {
+  const { id } = req.params;  // Use req.params instead of req.query
 
   if (!id) {
     return res.status(400).json({ error: 'Endpoint ID is required.' });

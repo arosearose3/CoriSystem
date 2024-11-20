@@ -1,87 +1,112 @@
 <script>
   import { onMount } from 'svelte';
-  import { base } from '$app/paths'; // Import base path
+  import { base } from '$app/paths';
 
   let practitioners = [];
   let organizations = [];
   let practitionerRoles = [];
   let selectedPractitioner = null;
   let availableOrganizations = [];
-  let selectedOrganizationId = null; // Declare selectedOrganizationId
+  let selectedOrganizationId = null;
   let message = '';
 
-  // Fetch practitioners and organizations when the component is mounted
   onMount(async () => {
     await fetchPractitioners();
     await fetchOrganizations();
   });
 
-  // Function to fetch practitioners and transform the FHIR response
   async function fetchPractitioners() {
-    try {
-      const response = await fetch(`${base}/api/practitioner/all`);
-      const data = await response.json();
+  try {
+    const response = await fetch(`${base}/api/practitioner/all`);
+    const data = await response.json();
 
-      // Check if the response is a FHIR bundle and has entries
-      if (data.resourceType === 'Bundle' && Array.isArray(data.entry)) {
-        practitioners = data.entry.map(entry => {
+    // Check if data is an array of entries with resource property
+    if (Array.isArray(data)) {
+      practitioners = data
+        .filter(entry => entry.resource?.resourceType === 'Practitioner')
+        .map(entry => {
           const practitioner = entry.resource;
-          return {
-            id: practitioner.id || '',
-            displayName: `${practitioner.name[0]?.given?.join(' ') || ''} ${practitioner.name[0]?.family || ''}`,
-          };
-        });
-      } else {
-        throw new Error('Invalid Practitioner FHIR Bundle format');
-      }
-    } catch (error) {
-      console.error('Error fetching practitioners:', error);
-      message = 'Error fetching practitioners. Please try again.';
-    }
-  }
+          const name = practitioner.name?.[0];
+          let displayName = '';
 
-  // Function to fetch all organizations
+          if (name?.text) {
+            displayName = name.text;
+          } else if (name?.given || name?.family) {
+            displayName = [
+              ...(name.given || []),
+              name.family
+            ].filter(Boolean).join(' ');
+          }
+
+          return {
+            id: practitioner.id,
+            resourceType: 'Practitioner',
+            displayName: displayName || 'Unnamed Practitioner',
+            active: practitioner.active,
+            email: practitioner.telecom?.find(t => t.system === 'email')?.value
+          };
+        })
+        .filter(p => p.active !== false) // Only include active practitioners
+        .sort((a, b) => a.displayName.localeCompare(b.displayName)); // Sort by name
+    } else {
+      throw new Error('Invalid response format');
+    }
+  } catch (error) {
+    console.error('Error fetching practitioners:', error);
+    message = `Error fetching practitioners: ${error.message}`;
+    practitioners = [];
+  }
+}
+
   async function fetchOrganizations() {
     try {
       const response = await fetch(`${base}/api/organization/all`);
       const data = await response.json();
 
-      // Check if the response is an array of organizations
       if (Array.isArray(data)) {
-        organizations = data.map(org => ({
-          id: org.id || '',
-          name: org.name || 'Unnamed Organization',
-        }));
+        organizations = data
+          .filter(org => org.active !== false) // Only include active organizations
+          .map(org => ({
+            id: org.id,
+            name: org.name || 'Unnamed Organization',
+            city: org.address?.[0]?.city || '',
+            state: org.address?.[0]?.state || ''
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
       } else {
-        throw new Error('Invalid Organization format');
+        throw new Error('Invalid Organization data format');
       }
     } catch (error) {
       console.error('Error fetching organizations:', error);
-      message = 'Error fetching organizations. Please try again.';
+      message = `Error fetching organizations: ${error.message}`;
+      organizations = [];
     }
   }
 
-  // Fetch PractitionerRoles for the selected practitioner
   async function fetchPractitionerRoles(practitionerId) {
     try {
       const response = await fetch(`${base}/api/role/PractitionerRole?practitioner=Practitioner/${practitionerId}`);
       const data = await response.json();
 
-      // Check if the response is a FHIR bundle and has entries
       if (data.resourceType === 'Bundle' && Array.isArray(data.entry)) {
-        practitionerRoles = data.entry.map(entry => {
-          const role = entry.resource;
-          return {
-            id: role.id,
-            practitionerName: selectedPractitioner.displayName,
-            organization: {
-              id: role.organization?.reference?.split('/')[1] || '',
-              name: role.organization?.display || 'Unknown Organization',
-            },
-          };
-        });
+        practitionerRoles = data.entry
+          .filter(entry => entry.resource && entry.resource.resourceType === 'PractitionerRole')
+          .map(entry => {
+            const role = entry.resource;
+            const orgReference = role.organization?.reference?.split('/')[1];
+            const organization = organizations.find(org => org.id === orgReference);
+            
+            return {
+              id: role.id,
+              practitionerId: practitionerId,
+              practitionerName: selectedPractitioner.displayName,
+              organization: {
+                id: orgReference || '',
+                name: organization?.name || role.organization?.display || 'Unknown Organization'
+              }
+            };
+          });
 
-        // Filter out already associated organizations for the dropdown
         updateAvailableOrganizations();
       } else {
         practitionerRoles = [];
@@ -89,149 +114,203 @@
       }
     } catch (error) {
       console.error('Error fetching PractitionerRoles:', error);
-      message = 'Error fetching PractitionerRoles. Please try again.';
+      message = `Error fetching practitioner roles: ${error.message}`;
+      practitionerRoles = [];
     }
   }
 
-  // Update available organizations for selection
   function updateAvailableOrganizations() {
     const associatedOrganizationIds = new Set(practitionerRoles.map(role => role.organization.id));
-    availableOrganizations = organizations.filter(org => !associatedOrganizationIds.has(org.id));
+    availableOrganizations = organizations
+      .filter(org => !associatedOrganizationIds.has(org.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  // Handle practitioner selection
   function handlePractitionerChange() {
     if (selectedPractitioner) {
       fetchPractitionerRoles(selectedPractitioner.id);
+      selectedOrganizationId = null; // Reset organization selection
     } else {
       practitionerRoles = [];
       availableOrganizations = [];
     }
   }
 
-  // Function to handle adding a new association
   async function addAssociation(organizationId) {
-  if (!selectedPractitioner || !organizationId) {
-    alert('Please select both a Practitioner and an Organization.');
-    return;
-  }
-
-  const organization = availableOrganizations.find(org => org.id === organizationId);
-  if (!organization) {
-    alert('Selected organization not found.');
-    return;
-  }
-
-  try {
-    // Send the request to create a new PractitionerRole
-    const response = await fetch(`${base}/api/role/create`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        practitionerId: selectedPractitioner.id,
-        organizationId: organizationId,
-      }),
-    });
-
-    // Parse the response data
-    const data = await response.json();
-
-    // Check if the response was successful
-    if (response.ok && data.message === 'PractitionerRole created successfully') {
-      alert('PractitionerRole created successfully.');
-      // Add the new role to the practitionerRoles array using the returned data
-      practitionerRoles = [...practitionerRoles, data.data];
-      updateAvailableOrganizations();
-    } else {
-      // Show an error message if the creation failed
-      alert(`Error creating PractitionerRole: ${data.error || 'Unknown error occurred.'}`);
+    if (!selectedPractitioner || !organizationId) {
+      message = 'Please select both a Practitioner and an Organization.';
+      return;
     }
-  } catch (error) {
-    console.error('Error adding association:', error);
-    alert(`Failed to create PractitionerRole: ${error.message}`);
-  }
-}
 
+    const organization = availableOrganizations.find(org => org.id === organizationId);
+    if (!organization) {
+      message = 'Selected organization not found.';
+      return;
+    }
+
+    try {
+      const response = await fetch(`${base}/api/role/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          practitionerId: selectedPractitioner.id,
+          organizationId: organizationId,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.message === 'PractitionerRole created successfully') {
+        message = 'Association created successfully.';
+        // Refresh the practitioner roles
+        await fetchPractitionerRoles(selectedPractitioner.id);
+        selectedOrganizationId = null;
+      } else {
+        throw new Error(data.error || 'Failed to create association');
+      }
+    } catch (error) {
+      console.error('Error adding association:', error);
+      message = `Failed to create association: ${error.message}`;
+    }
+  }
 </script>
 
 <div class="container">
   <h2>Associate Practitioners with Organizations</h2>
 
-  <!-- Practitioner selection -->
-  <label>Practitioner:</label>
-  <select bind:value={selectedPractitioner} on:change={handlePractitionerChange}>
-    <option value="">Select Practitioner</option>
-    {#each practitioners as practitioner}
-      <option value={practitioner}>{practitioner.displayName}</option>
-    {/each}
-  </select>
-
-  <!-- Display Practitioner-Organization pairs -->
-  {#if practitionerRoles.length > 0}
-    <h3>Associated Organizations</h3>
-    <ul>
-      {#each practitionerRoles as role}
-        <li>{role.practitionerName} - {role.organization.name}</li>
+  <div class="selection-container">
+    <label for="practitioner-select">Practitioner:</label>
+    <select 
+      id="practitioner-select"
+      bind:value={selectedPractitioner} 
+      on:change={handlePractitionerChange}
+    >
+      <option value={null}>Select Practitioner</option>
+      {#each practitioners as practitioner}
+        <option value={practitioner}>
+          {practitioner.displayName}
+        </option>
       {/each}
-    </ul>
+    </select>
+  </div>
+
+  {#if practitionerRoles.length > 0}
+    <div class="roles-container">
+      <h3>Current Associations</h3>
+      <ul class="roles-list">
+        {#each practitionerRoles as role}
+          <li>
+            <span class="org-name">{role.organization.name}</span>
+          </li>
+        {/each}
+      </ul>
+    </div>
   {/if}
 
-  <!-- Organization selection and add association -->
   {#if selectedPractitioner && availableOrganizations.length > 0}
     <div class="add-association">
-      <label>Associate with Organization:</label>
-      <select bind:value={selectedOrganizationId}>
-        <option value="">Select Organization</option>
+      <label for="org-select">Add Organization:</label>
+      <select 
+        id="org-select"
+        bind:value={selectedOrganizationId}
+      >
+        <option value={null}>Select Organization</option>
         {#each availableOrganizations as org}
-          <option value={org.id}>{org.name}</option>
+          <option value={org.id}>
+            {org.name} {org.city ? `(${org.city}${org.state ? `, ${org.state}` : ''})` : ''}
+          </option>
         {/each}
       </select>
-      <button on:click={() => addAssociation(selectedOrganizationId)}>Add Association</button>
+      <button 
+        on:click={() => addAssociation(selectedOrganizationId)}
+        disabled={!selectedOrganizationId}
+      >
+        Add Association
+      </button>
     </div>
   {/if}
 
   {#if message}
-    <p class="message">{message}</p>
+    <div class="message" class:error={message.includes('Error') || message.includes('Failed')}>
+      {message}
+    </div>
   {/if}
 </div>
 
 <style>
   .container {
-    max-width: 600px;
+    max-width: 800px;
     margin: 0 auto;
     padding: 20px;
   }
 
+  .selection-container {
+    margin-bottom: 20px;
+  }
+
+  .roles-container {
+    margin: 20px 0;
+  }
+
+  .roles-list {
+    list-style: none;
+    padding: 0;
+  }
+
+  .roles-list li {
+    padding: 8px;
+    margin: 4px 0;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+  }
+
   .add-association {
-    display: flex;
+    display: grid;
     gap: 10px;
     margin-top: 20px;
   }
 
   select {
-    flex-grow: 1;
-    margin-bottom: 10px;
-  }
-
-  button {
-    padding: 5px 10px;
-    background-color: #4CAF50;
-    color: white;
-    border: none;
-    cursor: pointer;
+    width: 100%;
+    padding: 8px;
+    margin: 5px 0;
+    border: 1px solid #ddd;
     border-radius: 4px;
   }
 
-  button:hover {
+  button {
+    padding: 8px 16px;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    background-color: #cccccc;
+    cursor: not-allowed;
+  }
+
+  button:hover:not(:disabled) {
     background-color: #45a049;
   }
 
   .message {
     margin-top: 15px;
     padding: 10px;
-    background-color: #f0f0f0;
     border-radius: 4px;
+    background-color: #e8f5e9;
+  }
+
+  .message.error {
+    background-color: #ffebee;
+    color: #c62828;
+  }
+
+  label {
+    font-weight: bold;
   }
 </style>

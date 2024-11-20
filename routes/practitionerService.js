@@ -8,8 +8,8 @@ import { auth, healthcare, PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID, hand
 
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
-import { UserCodes } from './userCodes.js'; // assuming UserCodes is in a separate file
-import { UserAdminCodes } from './userAdminCodes.js'; // assuming UserCodes is in a separate file
+//import { UserCodes } from './userCodes.js'; // assuming UserCodes is in a separate file
+//import { UserAdminCodes } from './userAdminCodes.js'; // assuming UserCodes is in a separate file
 
 import {service_getPractitionerRoles} from './roleService.js';
 import {service_createPractitionerRole} from './roleService.js';
@@ -17,13 +17,17 @@ import {service_updatePractitionerRoles} from './roleService.js';
 import {service_patchPractitionerRole} from './roleService.js';
 import {service_findExistingPractitionerRole} from './roleService.js';
 import {service_deletePractitionerRole} from './roleService.js';
-import { merchantapi_products_v1beta } from 'googleapis';
+
+import {createOrganization} from './organizationService.js';
+
+
+import { createUserCode } from './inviteService.js';
+import { getInviteCodeInfo } from './inviteService.js';
+
  
 
 
 export async function service_deletePractitioner(practitionerId) {
- 
-
   try {
       const accessToken = await getFhirAccessToken();
       console.log("Service: Deleting practitioner:", practitionerId);
@@ -294,24 +298,99 @@ export async function service_getAllPractitionerIds() {
 
 // Function to update a practitioner's email based on a code
 export async function service_updatePractitionerEmailFromCode(code, email, namestring) {
-  // Try user code first from Batch 1
-  const userCodeEntry = UserCodes.find(entry => entry.code === code);
-  if (userCodeEntry) {
-    return handleUserCode(userCodeEntry.practitionerId, email);
+
+  console.log ("practService, updatePractEmailFromCode, code", code, "email:", email, "name:", namestring);
+  try {
+    const inviteInfo = await getInviteCodeInfo(code);
+    console.log ("practService, updatePractEmailFromCode, inviteInfo", inviteInfo);
+    
+    if (!inviteInfo) {
+      throw new Error('Invalid invite code');
+    }
+
+    switch (inviteInfo.type) {
+      case 'user':
+        // Handle practitioner invite, which references an existing Practitioner Resource
+        const practitionerId = inviteInfo.data;
+        console.log ("practService, updatePractEmail from Code-user, practitionerId", practitionerId, "email:", email);
+        const practitioner = await fetchPractitioner(practitionerId);
+        await updatePractitionerEmail(practitioner, email);
+        return {
+          type: 'user',
+          message: 'Practitioner email updated'
+        };
+
+      case 'admin':
+        // Handle organization admin invite, create Pract, PractRole, and update roles
+        const organizationId = inviteInfo.data;
+
+        const practitionerResource = await util_createPractitionerResource({ email, name: namestring });
+        const adminpractR= await service_addPractitioner(practitionerResource);
+
+
+        console.log ("practService, updatePractEmail from Code-admin, practitionerResource", adminpractR.id, "org:", organizationId); 
+        const result = await service_createPractitionerRole(adminpractR.id, organizationId);
+      
+        await service_patchPractitionerRole(result.id, ['orgadmin','provider']);
+ 
+        return {
+          type: 'admin',
+          message: 'Organization admin created',
+        };
+
+
+      case 'neworg':
+        // Handle new organization creation
+        // create a Pract, an Org, a PractRole, and update roles
+        const organizationData = {
+          active: true,
+          type: [{ coding: [{ code: 'prov', system: 'http://terminology.hl7.org/CodeSystem/organization-type' }] }],
+          name: 'Edit Name',
+     //     alias: [''],
+          contact: [{
+            purpose: { coding: [{ code: 'ADMIN' }] },
+            name: namestring,
+            telecom: [
+            //  { system: 'phone', value: '' },
+              { system: 'email', value: email },
+             // { system: 'fax', value: '' }
+            ],
+            address: {
+              use: 'work',
+              type: 'both',
+              line: [''],
+              city: 'Anytown',
+              state: 'Colorado',
+              postalCode: '80001',
+              country: 'US'
+            }
+          }]
+        };
+
+        console.log ("practService, updatePractEmail from Code-admin, newOrg", organizationData);
+        const newOrg = await createOrganization(organizationData);
+
+        const practObj= util_createPractitionerResource({ email, name: namestring });
+        const practR= await service_addPractitioner(practObj);
+        console.log ("practService, updatePractEmail from Code-admin, practitionerResource", practR);
+        console.log ("practService, updatePractEmail from Code-admin, practitionerResource.id", practR.id, "org:", newOrg); 
+        const resultPR = await service_createPractitionerRole(practR.id, newOrg.id);
+        await service_patchPractitionerRole(resultPR.id, ['orgadmin','provider']);
+
+        return {
+          type: 'neworg',
+          message: 'New organization and admin created',
+        };
+
+      default:
+        throw new Error(`Unknown invite code type: ${inviteInfo.type}`);
+    }
+
+  } catch (error) {
+    console.error('Failed to process invite code:', error);
+    throw error;
   }
-  // Try admin code next from Batch 1
-  const adminCodeEntry = findAdminCodeEntry(code);
-  if (adminCodeEntry) {
-    return handleAdminCode(adminCodeEntry.OrganizationId, email, namestring);
-  }
-  // Finally, search for practitioner with matching invite code extension
-  const practitioner = await findPractitionerByInviteCode(code);
-  if (practitioner) {
-    await updatePractitionerWithRole(practitioner, email); //WRONG
-    return { message: 'Email updated successfully via invite code.' };
-  }
-  throw new Error('Invalid code - not found in any valid location');
- }
+}
 
 
  // updatePractitioner email, and create PractitionerRole for the org if there isn't one, and patch role. 
@@ -449,16 +528,18 @@ async function findPractitionerByInviteCode(code) {
 }
 
 async function updatePractitionerEmail(practitioner, email) {
-  if (!practitioner.telecom) {
-    practitioner.telecom = [];
-  }
+  // Ensure telecom property exists as an array
+  practitioner.telecom = Array.isArray(practitioner.telecom) ? practitioner.telecom : [];
+  
+  // Find or create the email field
   const emailField = practitioner.telecom.find(contact => contact.system === 'email');
   if (emailField) {
-    emailField.value = email;
+    emailField.value = email; // Update existing email field
   } else {
-    practitioner.telecom.push({ system: 'email', value: email, use: 'work' });
+    practitioner.telecom.push({ system: 'email', value: email, use: 'work' }); // Add new email field
   }
   
+  // Fetch access token and make the PUT request
   const accessToken = await getFhirAccessToken();
   return axios.put(`${FHIR_BASE_URL}/Practitioner/${practitioner.id}`, practitioner, {
     headers: {
@@ -489,18 +570,18 @@ async function findOrCreatePractitionerRole(practitionerId, orgId) {
 }
   
 
-function findAdminCodeEntry(code) {
+function findAdminCodeEntryOld(code) {
   if (!code) {
     throw new Error('Code is required');
   }
   // Always declare variables
-  const userCodeEntry = UserAdminCodes.find(entry => entry.code === code);
+/*   const userCodeEntry = UserAdminCodes.find(entry => entry.code === code);
   console.log("Checking admin code:", code, "Found entry:", userCodeEntry);
-  return userCodeEntry || null;
+  return userCodeEntry || null; */
 }
 
 
-function generateInviteCode() {
+function generateInviteCodeOld() {
   const chars = 'abcdefghijkmnopqrstuvwxyz023456789';
   let code = '';
   for (let i = 0; i < 9; i++) {
@@ -514,8 +595,11 @@ export async function service_addPractitioner(practitionerData) {
   try {
     let emailToCheck = practitionerData.telecom?.find(t => t.system === 'email')?.value;
     if (!emailToCheck) {
-     // throw new Error('Email is required');
+     // 
      // it's actually OK to make a Practitioner without an email, this is for the invitecode login flow
+
+    
+
     }
 
     if (emailToCheck) {
@@ -561,17 +645,6 @@ Object.keys(practitionerData).forEach(key => {
 
   practitionerData.resourceType = 'Practitioner';
 
-     // Generate and add invite code extension
-     const inviteCode =  generateInviteCode();
-     if (!practitionerData.extension) {
-       practitionerData.extension = [];
-     }
-     practitionerData.extension.push({
-       url: "https://combinebh.org/resources/FHIRResources/InviteCode.html",
-       valueString: inviteCode
-     });
-
-     console.log('pract/create/Prepared practitioner data:', JSON.stringify(practitionerData, null, 2));
 
   // Get access token
   console.log('Getting access token...');
@@ -595,6 +668,9 @@ Object.keys(practitionerData).forEach(key => {
       
       console.log('Received response:', JSON.stringify(response.data, null, 2));
       console.log('Practitioner ID from response:', response.data.id);
+
+      const inviteCode = await createUserCode(response.data.id);
+      console.log('pract/create/addPract inviteCode:', inviteCode);
 
       const result = {
           id: response.data.id,

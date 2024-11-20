@@ -1,116 +1,80 @@
 <script>
-    import { onMount, onDestroy } from 'svelte';
-    import { user } from '$lib/stores.js';
-    
-    let messages = [];
-    let loading = true;
-    let error = null;
-    let ws;
-    let unreadCount = 0;
-    
-    // Get Practitioner ID from store
-    $: practitionerId = $user?.practitioner?.Pid;
+  import { onMount } from 'svelte';
+  import { wsStore } from '$lib/websocketStore';
+  import { user } from '$lib/stores';
   
-    // Refresh messages when practitionerId changes
-    $: if (practitionerId) {
+  let loading = true;
+  let error = null;
+  
+  $: practitionerId = $user?.practitioner?.Pid;
+  $: messages = $wsStore.messages;
+  $: unreadCount = $wsStore.unreadCount;
+
+  async function loadMessages() {
+    if (!practitionerId) {
+      error = 'No practitioner ID available';
+      loading = false;
+      return;
+    }
+
+    try {
+      loading = true;
+      const response = await fetch(`/api/communication?recipient=Practitioner/${practitionerId}&_sort=-sent`);
+      if (!response.ok) throw new Error('Failed to load messages');
+      
+      const data = await response.json();
+      messages = data.entry?.map(e => e.resource) || [];
+    } catch (err) {
+      error = err.message;
+      console.error('Error loading messages:', err);
+    } finally {
+      loading = false;
+    }
+  }
+
+  async function markAsRead(messageId) {
+    if (!practitionerId) {
+      console.error('No practitioner ID available');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/communication/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          received: new Date().toISOString()
+        })
+      });
+
+      if (!response.ok) throw new Error('Failed to mark message as read');
+
+      messages = messages.map(m => 
+        m.id === messageId 
+          ? { ...m, received: new Date().toISOString() }
+          : m
+      );
+    } catch (err) {
+      console.error('Error marking message as read:', err);
+    }
+  }
+
+  onMount(() => {
+    if (practitionerId) {
       loadMessages();
     }
-  
-    async function loadMessages() {
-      if (!practitionerId) {
-        error = 'No practitioner ID available';
-        loading = false;
-        return;
-      }
-  
-      try {
-        loading = true;
-        const response = await fetch(`/api/communication?recipient=Practitioner/${practitionerId}&_sort=-sent`);
-        if (!response.ok) throw new Error('Failed to load messages');
-        
-        const data = await response.json();
-        messages = data.entry?.map(e => e.resource) || [];
-        updateUnreadCount();
-      } catch (err) {
-        error = err.message;
-        console.error('Error loading messages:', err);
-      } finally {
-        loading = false;
-      }
-    }
-  
-    function updateUnreadCount() {
-      unreadCount = messages.filter(m => !m.received).length;
-      window.dispatchEvent(new CustomEvent('unreadMessagesUpdated', { 
-        detail: { count: unreadCount } 
-      }));
-    }
-  
-    async function markAsRead(messageId) {
-      if (!practitionerId) {
-        console.error('No practitioner ID available');
-        return;
-      }
-  
-      try {
-        const response = await fetch(`/api/communication/${messageId}`, {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            received: new Date().toISOString()
-          })
-        });
-  
-        if (!response.ok) throw new Error('Failed to mark message as read');
-  
-        messages = messages.map(m => 
-          m.id === messageId 
-            ? { ...m, received: new Date().toISOString() }
-            : m
-        );
-        
-        updateUnreadCount();
-      } catch (err) {
-        console.error('Error marking message as read:', err);
-      }
-    }
-  
-    function setupWebSocket() {
-      ws = new WebSocket(`wss://${window.location.host}`);
-      
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'newMessage' && data.recipientId === practitionerId) {
-          messages = [data.message, ...messages];
-          updateUnreadCount();
-        }
-      };
-  
-      ws.onclose = () => {
-        setTimeout(setupWebSocket, 3000);
-      };
-    }
-  
-    onMount(() => {
-      if (practitionerId) {
-        loadMessages();
-        setupWebSocket();
-      }
-    });
-  
-    onDestroy(() => {
-      if (ws) ws.close();
-    });
-  
-    // Helper function to format sender/recipient references
-    function formatReference(reference) {
-      if (!reference) return '';
-      const [type, id] = reference.split('/');
-      return `${type} ${id}`;
-    }
-  </script>
+  });
+
+  // Helper function to format sender/recipient references
+  function formatReference(reference) {
+    if (!reference) return '';
+    const [type, id] = reference.split('/');
+    return `${type} ${id}`;
+  }
+</script>
+
   
   <div class="communication-viewer">
     <h3>Messages</h3>

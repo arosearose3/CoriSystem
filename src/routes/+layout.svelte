@@ -16,6 +16,9 @@
   import { browser } from '$app/environment';
   import { currentLanguage, activeTranslations } from '$lib/i18n'; // Import the translation function
 
+  import { wsStore } from '$lib/websocketStore.js';
+ // import Notifications from '$lib/components/Notifications.svelte';
+
 
   $: currentTranslations = $activeTranslations;
   $: translateText = (key) => {
@@ -71,9 +74,7 @@
 
   let isLoading = true;
   let errorMessage = writable('');
-
   let fetchError='';
-
 
   let isHomePage = false;
   let serving_dev = false;
@@ -89,8 +90,6 @@
     console.log("+layout Reactive User data:", JSON.stringify($user));
   }
 
-
-
   // Access environment variable using import.meta.env
   if (browser && import.meta.env.VITE_RUNTIME_ENV === "dev") {
     serving_dev = true;
@@ -103,12 +102,14 @@
   isLoading = true;
 
   try {
+    wsStore.init();
+
     console.log("+layout in onMount, before checkUserAuthStatus 1");
     const r = await checkUserAuthStatus();
-    console.log("+layout in onMount, before checkUserAuthStatus 2");
+    console.log("+layout in onMount, after checkUserAuthStatus 2");
     isUserAuthenticated.set(r);
 
-    console.log("+layout in onMount, before checkUserAuthStatus 3");
+    console.log("+layout in onMount, before currentUserData 3");
     let  currentUserData = get(user);
     console.log ("+layout,onMount currentUserdata:",JSON.stringify(currentUserData));
     console.log ("+layout,onMount r:",r);
@@ -122,7 +123,14 @@
       if (currentUserData?.practitioner?.Pid) {
         console.log ("+layout onmount 3");
         await fetchPractitionerRoles(currentUserData.practitioner.Pid);
-        console.log ("+layout onmount 4");
+        currentUserData = get(user); // Re-fetch to get updated user state
+        if (!currentUserData?.practitioner?.localOrgArray?.length) {
+          alert("No Associated Organizations found. Contact your organization administrator.");
+          handleLogout();
+        }
+        
+        isLoading = false; // Ensure loading is turned off after checks
+        console.log("+layout onmount 4");
       }
     }
     return () => {
@@ -222,7 +230,6 @@ async function fetchPractitionerData(email) {
           console.log("+layout/fetchPractDataEmail prID:" + practId);
           console.log("+layout/fetchPractDataEmail name:" + practName);
 
-         // await fetchPractitionerRoles(practId);
         } else {
           console.error('No practitioner data found for the provided email.');
           fetchError = 'No practitioner data found for the provided email.';
@@ -290,14 +297,20 @@ async function fetchPractitionerData(email) {
       console.log('fetchPR localOrglength:' + localOrgArray.length);
 
       // Now check the length of localOrgArray after it has been fully populated
+      // the user store (stores.js) keep an array of Orgs in LocalOrgArray
       if (localOrgArray.length > 1) {
         console.log('Showing role selection');
+      
       } else if (localOrgArray.length === 1) {
         console.log("+layout/fetchPR only one Pract");
+      
         selectPractitionerRole(practitionerRoles[0], localOrgArray[0].name);
+       
       } else {
+       
         console.error('No valid PractitionerRole resources found.');
         fetchError = 'No valid roles found for the practitioner.';
+       
       }
     } else {
       throw new Error('Failed to fetch practitioner roles');
@@ -375,7 +388,9 @@ function selectPractitionerRole(selectedRole, orgName) {
 
 
   onDestroy(() => {
-    if (browser) {     
+    if (browser) {    
+      wsStore.cleanup();
+
       document.body.style.userSelect = '';
       document.body.style.cursor = '';
       window.removeEventListener('mousemove', handleDragging);
@@ -579,7 +594,9 @@ async function handleInviteCode(event) {
       {#if !$user?.practitioner?.Pid && $user?.user?.id}
         <GetInviteCode on:submitInviteCode={handleInviteCode} />
       {:else if !selectedPractitionerRole && $isUserAuthenticated}
-        <LoginChooseOrg practitionerId={$user.practitioner?.Pid} on:OrgSelected={handleOrgSelected} />
+      
+           <LoginChooseOrg practitionerId={$user.practitioner?.Pid} on:OrgSelected={handleOrgSelected} />
+     
       {:else}
         {#if $user?.user?.id}
           <div class="user-info">

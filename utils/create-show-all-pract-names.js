@@ -2,7 +2,9 @@ import fs from 'fs';
 import csv from 'csv-parser';
 import axios from 'axios';
 
-const API_URL = 'https://elig.pro/avail/prod/api/practitioner/getAllPractitionerNamesAndIds';
+//const API_URL = 'https://elig.pro/avail/prod/api/practitioner/getAllPractitionerNamesAndIds';
+
+const API_URL = 'https:localhost:3001/api/practitioner/getAllPractitionerNamesAndIds';
 
 
 // Fetch practitioner names and log them to the console

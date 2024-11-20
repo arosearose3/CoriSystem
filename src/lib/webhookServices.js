@@ -21,6 +21,8 @@ export async function updateWebhook(id, webhookData) {
 }
 
 export async function deleteWebhook(id) {
-  const response = await axios.delete(`/api/webhook/${id}`);
+  //comment
+  //comment
+  const response = await axios.delete(`/api/webhook/delete/${id}`);
   return response.data;
 }

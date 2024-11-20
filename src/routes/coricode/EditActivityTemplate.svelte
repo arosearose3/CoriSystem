@@ -11,16 +11,25 @@
   
   let name = template.name;
   let description = template.description;
+  let useCustomApi = false; 
+  let customApiEndpoint = ''; 
   let selectedApi = systemApis.find(api => api.endpoint === getEndpointFromTemplate(template)) || systemApis[0];
   let parameters = initializeParameters(template);
   let isSaving = false;
   let errorMessage = '';
 
-
     // When initializing from an existing template, verify it's actually a template
     onMount(() => {
+    const templateEndpoint = getEndpointFromTemplate(template);
     if (template.id && !isTemplate(template)) {
       errorMessage = 'Warning: Editing an ActivityDefinition that is not marked as a template';
+    }
+    
+    // Check if the template uses a custom API
+    if (templateEndpoint && !systemApis.some(api => api.endpoint === templateEndpoint)) {
+      useCustomApi = true;
+      customApiEndpoint = templateEndpoint;
+      selectedApi = null;
     }
   });
 
@@ -94,16 +103,17 @@
   }
   
   function transformToFhirResource() {
-    // Create dynamicValue array starting with endpoint
+    // Get the endpoint based on whether custom API is being used
+    const endpoint = useCustomApi ? customApiEndpoint : selectedApi?.endpoint;
+    
     const dynamicValue = [
       {
         path: 'endpoint',
         expression: {
           language: 'text/fhirpath',
-          expression: `'${selectedApi.endpoint}'`
+          expression: `'${endpoint}'`
         }
       },
-      // Add all other parameters
       ...parameters.map(param => ({
         path: param.name,
         expression: {
@@ -117,7 +127,7 @@
 
     const fhirResource = {
       resourceType: "ActivityDefinition",
-      usage: "combine-activity-template",  // Explicitly mark as template
+      usage: "combine-activity-template",
       status: "active",
       kind: "ServiceRequest",
       name: name,
@@ -208,18 +218,42 @@
     </div>
     
     <div class="form-group">
-      <label for="api">System API</label>
-      <select 
-        id="api" 
-        bind:value={selectedApi} 
-        required
-      >
-        <option value="">Select API</option>
-        {#each systemApis as api}
-          <option value={api}>{api.name} ({api.endpoint})</option>
-        {/each}
-      </select>
+      <label class="checkbox-label">
+        <input 
+          type="checkbox"
+          bind:checked={useCustomApi}
+        />
+        Use Custom API Endpoint
+      </label>
     </div>
+    
+    {#if useCustomApi}
+      <div class="form-group">
+        <label for="customApi">Custom API Endpoint</label>
+        <input 
+          id="customApi"
+          type="text"
+          bind:value={customApiEndpoint}
+          placeholder="Enter API endpoint URL"
+          required
+        />
+      </div>
+    {:else}
+      <div class="form-group">
+        <label for="api">System API</label>
+        <select 
+          id="api" 
+          bind:value={selectedApi} 
+          required
+        >
+          <option value="">Select API</option>
+          {#each systemApis as api}
+            <option value={api}>{api.name} ({api.endpoint})</option>
+          {/each}
+        </select>
+      </div>
+    {/if}
+    
     
     <div class="parameters">
       <h3>Parameters</h3>
@@ -424,5 +458,17 @@
   button:disabled {
     opacity: 0.7;
     cursor: not-allowed;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    margin: 0;
   }
 </style>

@@ -7,15 +7,16 @@
   let resourcePreview = '';
   let showPayload = false;
   
-  // Auto-generate address when name changes with full URL
-  $: formData.address = formData.name ? 
+
+
+  $: if (!isEditMode && formData.name && !formData.name.includes('-')) {
+    formData.name = `${formData.name}-${generateRandomString(6)}`;
+  }
+
+    // Auto-generate address when name changes with full URL
+    $: formData.address = formData.name ? 
     `http://cori.system/event/webhook/${formData.name}` : '';
 
-  $: {
-   if (!isEditMode && formData.name) {
-     formData.nameplus = `${formData.name}-${generateRandomString(6)}`;
-   }
- }
 
   
   let formData = {
@@ -85,7 +86,6 @@
   async function handleSubmit() {
     try {
       if (!isEditMode) {
-        formData.name = formData.nameplus;
         formData.address = `http://cori.system/event/webhook/${formData.name}`;
       }
 
@@ -140,7 +140,7 @@
     />
     {#if !isEditMode}
       <div class="text-sm text-gray-600">
-        Generated Name Preview: {formData.nameplus}
+        Generated Name Preview: {formData.name}
       </div>
     {/if}
   </div>

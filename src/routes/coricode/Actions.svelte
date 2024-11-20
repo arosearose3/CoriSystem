@@ -8,6 +8,8 @@
   
   // Available system APIs
   const systemApis = [
+    { id: 'logNow', name: 'Console Log Now', endpoint: '/api/test-activity/log-timestamp' },
+    { id: 'logString', name: 'Console Log String', endpoint: '/api/test-activity/log-message' },  
     { id: 'email', name: 'Email API', endpoint: '/api/email' },
     { id: 'sms', name: 'SMS API', endpoint: '/api/sms' },
     { id: 'task', name: 'Task API', endpoint: '/api/task' },

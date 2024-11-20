@@ -14,29 +14,31 @@
  
 
     async function testWebhook(webhook) {
-    const webhookId = webhook.id;
-    testResults.set(webhookId, { status: 'testing' });
-    testResults = testResults;
+            const webhookId = webhook.id;
+            testResults.set(webhookId, { status: 'testing' });
+            testResults = testResults;
 
-    try {
-        const webhookUrl = `https://localhost:3001/events/webhook/${webhook.name}`;
-        const response = await axios.post(webhookUrl, 
-    {
-        test: true,
-        timestamp: new Date().toISOString()
-    },
-    {
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    }
-);
+            try {
+                const webhookUrl = `https://localhost:3001/events/webhook/${webhook.name}`;
+                const response = await axios.post(webhookUrl, 
+            {
+                test: true,
+                timestamp: new Date().toISOString()
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
         testResults.set(webhookId, { 
             status: 'success',
             statusCode: response.status,
             testedUrl: webhookUrl
         });
     } catch (error) {
+        console.error('Webhook request failed:', error.response?.data || error.message);
+
         testResults.set(webhookId, { 
             status: 'error',
             message: error.message,

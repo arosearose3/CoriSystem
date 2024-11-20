@@ -10,6 +10,7 @@
     "logout": "Log Out",
     "clients": "Clients",
     "providerClients": "Provider Clients",
+    "Communication": "Communication",
     "organizationClients": "Organization Clients",
     "coriHelpdesk": "Cori Helpdesk",
     "helpdesk": "Helpdesk",
@@ -59,7 +60,10 @@
     "saving": "Saving",
     "saveChanges": "Save Changes",
     "editOrganization": "Edit Organization",
-    "contactPoints": "Contact Points"
+    "contactPoints": "Contact Points",
+
+    "staffAvailability": "Staff Availability",
+    "staffInformation": "Staff Information"
 
 
 }

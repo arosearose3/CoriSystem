@@ -1,4 +1,4 @@
-export const UserAdminCodes = [
+[
   {
     "code": "gs4dip3np",
     "OrganizationId": "bbba02e4-68ce-43ff-85e9-6381cc2cb702"
@@ -203,4 +203,4 @@ export const UserAdminCodes = [
     "code": "f27lh1y9z",
     "OrganizationId": "b8b6ef3a-8c5b-4af7-a525-3cd46a2948dd"
   }
-];
+]

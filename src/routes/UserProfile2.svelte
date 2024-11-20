@@ -1,6 +1,8 @@
 <!-- src/lib/components/UserProfile.svelte -->
 <script>
 
+import Notifications from './UserNotifications.svelte';
+
 import { currentLanguage, activeTranslations } from '$lib/i18n';
   $: currentTranslations = $activeTranslations;
   $: translateText = (key) => {
@@ -62,6 +64,7 @@ import { currentLanguage, activeTranslations } from '$lib/i18n';
         <div class="name">{userData.name} {translateText('at')} {currentOrgName}</div>
         <div class="email">{userData.email}</div>
       </div>
+      <Notifications /> 
     </div>
   </div>
 {/if}

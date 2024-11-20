@@ -13,9 +13,11 @@ export function createLogger({ service = 'event-processor', level = 'info' } = {
     };
   
     const formatMessage = (messageLevel, message, meta = {}) => {
+     
       const timestamp = new Date().toISOString();
       const metaString = Object.keys(meta).length ? JSON.stringify(meta) : '';
-      return `${timestamp} [${service}] ${messageLevel.toUpperCase()}: ${message} ${metaString}`;
+     // return `${timestamp} [${service}] ${messageLevel.toUpperCase()}: ${message} ${metaString}`;
+      return `${message} ${metaString}`;
     };
   
     return {
