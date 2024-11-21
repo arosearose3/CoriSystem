@@ -1,5 +1,5 @@
 <script>
-    import {Editor} from '@tadashi/svelte-editor-quill'
+   // import {Editor} from '@tadashi/svelte-editor-quill'
   
     const options = {
       theme: 'snow',
@@ -23,11 +23,7 @@
     />
   </svelte:head>
   
-  <Editor
-    {options}
-    {data}
-    on:text-change="{onTextChange}"
-  />
+  Editor
   
   <div>
     <h3>Text</h3>

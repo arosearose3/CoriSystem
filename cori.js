@@ -236,8 +236,8 @@ async function initializeEventProcessing() {
  */
 
     const httpsOptions = {
-      key: fs.readFileSync('/xd1/homes/hash/23/97/a19723/05/49/u184905/bin6/clinicmgr/.certs/localhost-key.pem'),
-      cert: fs.readFileSync('/xd1/homes/hash/23/97/a19723/05/49/u184905/bin6/clinicmgr/.certs/localhost.pem'),
+      key: fs.readFileSync('./.certs/localhost-key.pem'),
+      cert: fs.readFileSync('./.certs/localhost.pem'),
  //     ca: fs.readFileSync('/xd1/homes/hash/23/97/a19723/05/49/u184905/bin6/clinicmgr/.certs/ca_bundle.crt'),
     };
 
