@@ -118,6 +118,31 @@ const oauth2Client = new OAuth2Client(
 // Initialize route services
 const routeServices = new RouteServices(logger, BASE_PATH, oauth2Client);
 
+
+
+async function getEpicAccessToken(code) {
+  const tokenUrl = process.env.EPIC_TOKEN_URL;
+  const params = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: process.env.EPIC_REDIRECT_URI,
+    client_id: process.env.EPIC_CLIENT_ID,
+    client_secret: process.env.EPIC_CLIENT_SECRET,
+  });
+
+  try {
+    const response = await axios.post(tokenUrl, params, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    });
+    return response.data;
+  } catch (error) {
+    logger.error('Failed to fetch Epic access token', {
+      error: error.response?.data || error.message,
+    });
+    throw error;
+  }
+}
+
 // FHIR API caller
 async function callFhirApi(method, path, data = null) {
   try {
@@ -259,9 +284,23 @@ async function initializeEventProcessing() {
 // Configure express middleware
 function configureMiddleware() {
   app.use(cors({
-    origin: process.env.CLIENT_URL,
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        process.env.CLIENT_URL,                      // Your client URL
+        /\.epic\.com$/,                              // Any Epic domain (regex for subdomains)
+        'https://fhir.epic.com',                     // Epic FHIR sandbox
+      ];
+  
+      // Check if origin is in the list or matches regex
+      if (!origin || allowedOrigins.some(o => (typeof o === 'string' && o === origin) || (o instanceof RegExp && o.test(origin)))) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true
   }));
+
   app.use(express.json());
   app.use(express.static('public'));
   app.use(routeServices.handleError.bind(routeServices));
@@ -274,7 +313,8 @@ function configureMiddleware() {
     cookie: {
       secure: true,
       httpOnly: true,
-      sameSite: 'lax',
+ //     sameSite: 'lax',
+      sameSite: 'none',
       maxAge: 24 * 60 * 60 * 1000
     }
   }));
@@ -284,6 +324,14 @@ function configureMiddleware() {
 
   app.use(passport.initialize());
   app.use(passport.session());
+
+  //allow to run in iframe
+  app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.epic.com");
+    next();
+  });
+
+
 }
 
 // Configure routes in correct order
@@ -291,6 +339,57 @@ function configureRoutes() {
   // 1. Auth routes first
   routeServices.setupAuthRoutes(app);
   
+  // Epic auth route
+
+  app.get('/epic/callback', async (req, res) => {
+      const { iss, launch, code, state } = req.query;
+    
+      // Case 1: Initial Launch from Epic
+      if (iss && launch) {
+        try {
+          const authUrl = `${iss}/oauth2/authorize?response_type=code&client_id=${process.env.EPIC_CLIENT_ID}&redirect_uri=${process.env.EPIC_REDIRECT_URI}&launch=${launch}&scope=launch/patient openid fhirUser&state=uniqueStateIdentifier`;
+    
+          // Redirect the user to Epic's authorization server
+          return res.redirect(authUrl);
+        } catch (error) {
+          logger.error('Error processing launch request from Epic:', error);
+          return res.status(500).send('Failed to process launch request.');
+        }
+      }
+    
+      // Case 2: Callback After Authorization
+      if (code) {
+        try {
+          // Exchange the authorization code for an access token
+          const tokenResponse = await axios.post(`${process.env.EPIC_TOKEN_URL}`, {
+            grant_type: 'authorization_code',
+            code,
+            redirect_uri: process.env.EPIC_REDIRECT_URI,
+            client_id: process.env.EPIC_CLIENT_ID,
+            client_secret: process.env.EPIC_CLIENT_SECRET,
+          }, {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          });
+    
+          const tokenData = tokenResponse.data;
+    
+          logger.info('Epic access token received', tokenData);
+    
+          // Store the access token securely
+          req.session.epicAccessToken = tokenData.access_token;
+    
+          // Redirect to the main app or dashboard
+          return res.redirect(`${process.env.CLIENT_URL}/dashboard`);
+        } catch (error) {
+          logger.error('Error exchanging authorization code:', error);
+          return res.status(500).send('Failed to exchange authorization code for token.');
+        }
+      }
+    
+      // If neither case matches, return an error
+      res.status(400).send('Invalid request: Missing required parameters.');
+    });
+
   // 2. Event routes
   app.use(`${BASE_PATH}/events`, 
     routeServices.logEventRequest.bind(routeServices),

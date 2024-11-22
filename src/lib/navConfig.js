@@ -98,7 +98,7 @@ export const navItems = [
   {
     labelKey: 'coriCode',
     icon: '⚙️',
-    path: `${base}/coricode`,
+    path: `${base}/workflows`,
     subject: 'Coricode',
     roles: ['admin'], 
 
