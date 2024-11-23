@@ -1,204 +1,176 @@
-
-// components/canvas/FlowNode.svelte
 <script>
-  import { createEventDispatcher } from 'svelte';
-  import { 
-    Webhook, 
-    Clock, 
-    Database,
-    Split, 
-    GitBranch,
-    List,
-    Cog,
-    GripHorizontal,
-    X 
-  } from 'lucide-svelte';
+    import { createEventDispatcher, onDestroy } from 'svelte';
+    
+    export let node;
+    const dispatch = createEventDispatcher();
   
-  const dispatch = createEventDispatcher();
-
-  export let node;
-  export let selected = false;
-  export let position = { x: 0, y: 0 };
-
-  let isDragging = false;
-  let dragOffset = { x: 0, y: 0 };
-
-  // Node type specific configurations
-  const nodeConfigs = {
-    webhook: {
-      icon: Webhook,
-      color: 'blue',
-      label: 'Webhook Event'
-    },
-    timer: {
-      icon: Clock,
-      color: 'purple',
-      label: 'Timer Event'
-    },
-    'fhir-change': {
-      icon: Database,
-      color: 'green',
-      label: 'FHIR Change'
-    },
-    parallel: {
-      icon: Split,
-      color: 'orange',
-      label: 'Parallel Execution'
-    },
-    condition: {
-      icon: GitBranch,
-      color: 'yellow',
-      label: 'Condition'
-    },
-    sequence: {
-      icon: List,
-      color: 'gray',
-      label: 'Sequence'
-    },
-    activity: {
-      icon: Cog,
-      color: 'indigo',
-      label: 'Activity'
+    let nodeEl;
+    let isDragging = false;
+    let dragStart = { x: 0, y: 0 };
+    let position = {
+      x: node.position.x,
+      y: node.position.y
+    };
+  
+    $: {
+    if (!isDragging && node.position) {
+        // Only update from props if we're not the ones who just finished dragging
+        if (position.x !== node.position.x || position.y !== node.position.y) {
+            position = {
+                x: node.position.x,
+                y: node.position.y
+            };
+        }
     }
-  };
+}
 
-  $: config = nodeConfigs[node.type] || nodeConfigs.activity;
+  function handleNodeMouseDown(event) {
+    if (event.target.classList.contains('port')) {
+        return;
+    }
 
-  function handleDragStart(event) {
+    event.stopPropagation();
     isDragging = true;
-    const rect = event.target.getBoundingClientRect();
-    dragOffset = {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top
+    
+    // Calculate offset from node's current position
+    dragStart = {
+        x: event.clientX - position.x,
+        y: event.clientY - position.y
     };
-    dispatch('dragstart', { node, event });
-  }
 
-  function handleDrag(event) {
-    if (!isDragging) return;
+    dispatch('dragstart', { nodeId: node.id });
     
-    const newPosition = {
-      x: event.clientX - dragOffset.x,
-      y: event.clientY - dragOffset.y
-    };
-    
-    dispatch('move', {
+    // Add handlers to window
+    window.addEventListener('mousemove', handleNodeMouseMove);
+    window.addEventListener('mouseup', handleNodeMouseUp);
+}
+
+  function handlePortMouseDown(event, portType) {
+    event.stopPropagation(); // Prevent node drag
+    event.preventDefault();
+
+    dispatch('portdragstart', {
       nodeId: node.id,
-      position: newPosition
+      portType,
+      portElement: event.target
     });
   }
 
-  function handleDragEnd() {
-    isDragging = false;
-    dispatch('dragend', { node });
-  }
+  
+  function handleNodeMouseMove(event) {
+    if (!isDragging) return;
 
-  function handleSelect() {
-    dispatch('select', { node });
-  }
-
-  function handleDelete() {
-    dispatch('delete', { nodeId: node.id });
-  }
-
-  function getPortPositions() {
-    // Calculate port positions for node connections
-    const width = 200; // Node width
-    const height = 100; // Node height
-    
-    return {
-      top: { x: position.x + width/2, y: position.y },
-      right: { x: position.x + width, y: position.y + height/2 },
-      bottom: { x: position.x + width/2, y: position.y + height },
-      left: { x: position.x, y: position.y + height/2 }
+    // Calculate new position relative to drag start
+    position = {
+        x: event.clientX - dragStart.x,
+        y: event.clientY - dragStart.y
     };
-  }
-</script>
+    
+    // Update store with new position
+    dispatch('nodemove', {
+        nodeId: node.id,
+        position
+    });
+}
+  
+function handleNodeMouseUp() {
+    if (!isDragging) return;
+    
+    const finalPosition = { ...position }; // Save final position
+    cleanupDrag();
+    
+    // Update store with final position
+    dispatch('nodemove', {
+        nodeId: node.id,
+        position: finalPosition
+    });
+    
+    dispatch('dragend', { nodeId: node.id });
+}
 
-<div
-  class="absolute select-none"
-  style="left: {position.x}px; top: {position.y}px;"
-  class:selected={selected}
-  on:mousedown={handleDragStart}
-  on:click|stopPropagation={handleSelect}
->
-  <div 
-    class="relative rounded-lg shadow-lg p-4 w-[200px] cursor-move
-           border-2 transition-all duration-200"
-    class:border-{config.color}-500={selected}
-    class:border-gray-200={!selected}
-    class:bg-{config.color}-50={selected}
-    class:bg-white={!selected}
+function cleanupDrag() {
+    window.removeEventListener('mousemove', handleNodeMouseMove);
+    window.removeEventListener('mouseup', handleNodeMouseUp);
+    isDragging = false;
+}
+
+// NEW: Add back onDestroy cleanup
+onDestroy(() => {
+    cleanupDrag();
+});
+  </script>
+  
+  <div
+    bind:this={nodeEl}
+    class="node"
+    style="transform: translate({position.x}px, {position.y}px);"
+    on:mousedown={handleNodeMouseDown}
   >
-    <!-- Drag Handle -->
+    <div class="node-content">
+      <h4 class="node-title">{node.label}</h4>
+    </div>
+  
     <div 
-      class="absolute top-0 left-0 right-0 h-6 flex items-center justify-center
-             cursor-move hover:bg-gray-50 rounded-t-lg"
-    >
-      <GripHorizontal class="w-4 h-4 text-gray-400" />
+    class="port port-input"
+    data-node-id={node.id}
+    data-port-type="input"
+    on:mousedown={(e) => handlePortMouseDown(e, 'input')}
+  >
+      Input
     </div>
-
-    <!-- Content -->
-    <div class="pt-4">
-      <div class="flex items-center mb-2">
-        <svelte:component 
-          this={config.icon} 
-          class="w-5 h-5 mr-2 text-{config.color}-500"
-        />
-        <span class="font-medium">{node.label || config.label}</span>
-      </div>
-
-      <!-- Node specific content -->
-      {#if node.type === 'webhook'}
-        <div class="text-xs text-gray-500 truncate">
-          {node.data?.url || 'Configure webhook URL'}
-        </div>
-      {:else if node.type === 'timer'}
-        <div class="text-xs text-gray-500">
-          {node.data?.schedule || 'Configure schedule'}
-        </div>
-      {:else if node.type === 'condition'}
-        <div class="text-xs text-gray-500">
-          {node.data?.expression || 'Configure condition'}
-        </div>
-      {/if}
-
-      <!-- Action buttons -->
-      <div class="absolute top-2 right-2 flex space-x-1">
-        {#if node.type !== 'event'}
-          <button
-            class="p-1 hover:bg-gray-100 rounded"
-            on:click|stopPropagation={handleDelete}
-          >
-            <X class="w-4 h-4 text-gray-400" />
-          </button>
-        {/if}
-      </div>
+  
+    <div 
+    class="port port-output"
+    data-node-id={node.id}
+    data-port-type="output"
+    on:mousedown={(e) => handlePortMouseDown(e, 'output')}
+  >
+      Output
     </div>
-
-    <!-- Connection ports -->
-    {#if !['webhook', 'timer', 'fhir-change'].includes(node.type)}
-      <div class="absolute top-1/2 -left-2 w-4 h-4 bg-white border-2 border-gray-300 rounded-full transform -translate-y-1/2 cursor-pointer port-left" />
-      <div class="absolute top-1/2 -right-2 w-4 h-4 bg-white border-2 border-gray-300 rounded-full transform -translate-y-1/2 cursor-pointer port-right" />
-    {/if}
   </div>
-</div>
-
-<style>
-  .selected {
-    z-index: 10;
+  
+  <style>
+    .node {
+      position: absolute;
+      width: 120px;
+      background-color: white;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      padding: 8px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      cursor: move;
+      user-select: none;
+    }
+  
+    .node-title {
+      font-size: 14px;
+      font-weight: bold;
+      text-align: center;
+      margin: 0 0 8px 0;
+    }
+  
+    .port {
+    width: 12px;
+    height: 12px;
+    background-color: #4A90E2;
+    border-radius: 50%;
+    position: absolute;
+    cursor: crosshair; /* Changed to crosshair for better UX */
   }
 
-  .port-left:hover, .port-right:hover {
-    border-color: theme('colors.blue.500');
+  .port-input {
+    top: 50%;
+    left: -6px;
+    transform: translateY(-50%);
   }
 
-  /* Add animation for dragging */
-  .dragging {
-    opacity: 0.8;
-    transform: scale(1.05);
-    transition: transform 0.2s ease;
+  .port-output {
+    top: 50%;
+    right: -6px;
+    transform: translateY(-50%);
   }
-</style>
-
-
+  
+    .port:hover {
+      background-color: #357ABD;
+    }
+  </style>

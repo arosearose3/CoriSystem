@@ -119,6 +119,29 @@ const oauth2Client = new OAuth2Client(
 const routeServices = new RouteServices(logger, BASE_PATH, oauth2Client);
 
 
+function createServer() {
+  try {
+    const httpsOptions = {
+      key: fs.readFileSync('./.certs/localhost-key.pem'),
+      cert: fs.readFileSync('./.certs/localhost.pem'),
+    };
+
+    const server = https.createServer(httpsOptions, app);
+
+    server.on('error', (err) => {
+      logger.error('Server encountered an error:', {
+        message: err.message,
+        stack: err.stack,
+      });
+    });
+
+    return server;
+  } catch (error) {
+    logger.error('Failed to create server:', error);
+    throw error;
+  }
+}
+
 
 async function getEpicAccessToken(code) {
   const tokenUrl = process.env.EPIC_TOKEN_URL;
@@ -203,10 +226,10 @@ async function callFhirApi(method, path, data = null) {
 }
 
 // Initialize activity executor
-const activityExecutor = new ActivityExecutor({
+/* const activityExecutor = new ActivityExecutor({
   callFhirApi,
   logger
-});
+}); */
 
 // Configure passport
 function configurePassport() {
@@ -260,21 +283,14 @@ async function initializeEventProcessing() {
     console.log('Key path:', path.resolve(__dirname, './certs/private.key'));
  */
 
-    const httpsOptions = {
-      key: fs.readFileSync('./.certs/localhost-key.pem'),
-      cert: fs.readFileSync('./.certs/localhost.pem'),
- //     ca: fs.readFileSync('/xd1/homes/hash/23/97/a19723/05/49/u184905/bin6/clinicmgr/.certs/ca_bundle.crt'),
-    };
 
-
-    const server = https.createServer(httpsOptions, app);
     
   const wsManager = new WebSocketManager(server, logger);
 //  const wsManager = null;
     app.locals.wsManager = wsManager;
     eventProcessor.setWebSocketManager(wsManager);
     
-    return server;
+  
   } catch (error) {
     logger.error('Failed to initialize event processor:', error);
     throw error;
@@ -391,10 +407,10 @@ function configureRoutes() {
     });
 
   // 2. Event routes
-  app.use(`${BASE_PATH}/events`, 
+/*   app.use(`${BASE_PATH}/events`, 
     routeServices.logEventRequest.bind(routeServices),
     createEventRoutes(eventProcessor, logger)
-  );
+  ); */
   
   // 3. API routes
   const apiRoutes = {
@@ -437,14 +453,9 @@ function configureRoutes() {
 }
 
 // Server startup
-async function startServer() {
-  try {
-    logger.info('Starting server initialization');
-    
-    configureMiddleware();
-    configurePassport();
-
-    logger.info('Initializing activity executor');
+async function startServer(server_arg) {
+ 
+/*     logger.info('Initializing activity executor');
     try {
       await activityExecutor.initialize();
       logger.info('Activity executor initialized successfully');
@@ -461,46 +472,100 @@ async function startServer() {
     
     if (!eventProcessor?.initialized) {
       throw new Error('Event processor initialization failed');
-    }
-    
-    configureRoutes();
-    
+    } */
+
     // list endpoints to console
-    const endpoints = listEndpoints(app)
+/*     const endpoints = listEndpoints(app)
       .filter(endpoint => !endpoint.path.startsWith('/api'))
       .sort((a, b) => a.path.localeCompare(b.path));
     
     logger.info(`Found ${endpoints.length} non-API endpoints:`);
+    
     endpoints.forEach(endpoint => {
       logger.info('Endpoint:', {
         path: endpoint.path,
         methods: endpoint.methods.join(', '),
    //     middlewares: endpoint.middlewares.join(', ')
       });
-    });
+    }); */
     
     //  Start server
     const PORT = process.env.SERVER_PORT || 3001;
+
+    try{
+      console.log ("start - before Promise");
     await new Promise((resolve, reject) => {
-      server.listen(PORT, (err) => {
-        if (err) reject(err);
-        else {
-          logger.info(`HTTPS Server running on port ${PORT}`, {
-            eventProcessorState: {
-              initialized: eventProcessor.initialized,
-              webhookCount: eventProcessor.webhookEvents.size,
-              registeredPaths: Array.from(eventProcessor.webhookEvents.keys())
-            }
-          });
-          resolve();
-        }
-      });
-    });
+     
     
-    return server;
+      // Listen for 'error' events on the server
+      console.log ("start - before on error");
+      server_arg.on('error', (err) => {
+        logger.error('Server failed to start:', err);
+        reject(err);
+      });
+    
+      logger.info('start - before server.listen');
+
+      server_arg.listen(PORT, () => {
+        logger.info(`HTTPS Server running on port ${PORT}`);
+        resolve();
+      });
+
+      // Start the server
+/*       server.listen(PORT, () => {
+        logger.info(`HTTPS Server running on port ${PORT}`);
+        
+        logger.info('Server Details', {
+          eventProcessorState: {
+            initialized: eventProcessor.initialized,
+            webhookCount: eventProcessor.webhookEvents.size,
+            registeredPaths: Array.from(eventProcessor.webhookEvents.keys())
+          }
+        });
+        
+        logger.info('start - before resolve');
+        resolve();
+      }); */
+    });
+
+
+    return server_arg;
+
   } catch (error) {
     logger.error('Server startup failed:', error);
     throw error;
+  }
+}
+
+async function main() {
+  try {
+    logger.info('Initializing middleware and routes');
+    configureMiddleware();
+    configurePassport();
+    configureRoutes();
+
+/*     logger.info('Initializing event processor');
+    await initializeEventProcessor(); */
+
+    logger.info('Creating HTTPS server');
+    const server = createServer();
+    logger.info('Starting server:');
+    await startServer(server);
+
+    logger.info('Initializing WebSocket manager');
+
+    const wsManager = new WebSocketManager(server, logger);
+    // Attach WebSocket manager to the app.locals or event processor if needed
+    app.locals.wsManager = wsManager;
+    if (eventProcessor) {
+      eventProcessor.setWebSocketManager(wsManager);
+    }
+
+    logger.info('Application started successfully');
+
+  } catch (error) {
+    logger.error('Application failed to start:', error);
+    process.exit(1);
   }
 }
 
@@ -513,7 +578,7 @@ function setupShutdownHandlers() {
         const activeExecutions = eventProcessor.activityExecutor.getActiveExecutions();
         logger.info(`Cleaning up ${activeExecutions.length} active executions`);
         await eventProcessor.activityExecutor.cleanup();
-        
+
         if (eventProcessor.wsManager) {
           const clientCount = eventProcessor.wsManager.wss.clients.size;
           logger.info(`Closing ${clientCount} WebSocket connections`);
@@ -522,18 +587,6 @@ function setupShutdownHandlers() {
           });
         }
       }
-      
-      if (server) {
-        await new Promise((resolve, reject) => {
-          server.close((err) => {
-            if (err) reject(err);
-            else {
-              logger.info('Server closed successfully');
-              resolve();
-            }
-          });
-        });
-      }
     } catch (error) {
       logger.error('Error during cleanup:', error);
     } finally {
@@ -541,7 +594,7 @@ function setupShutdownHandlers() {
       process.exit(0);
     }
   }
-  
+
   process.on('SIGTERM', cleanup);
   process.on('SIGINT', () => {
     logger.info('SIGINT received');
@@ -549,11 +602,9 @@ function setupShutdownHandlers() {
   });
 }
 
-// Start the server
-setupShutdownHandlers();
-startServer().catch(error => {
-  logger.error('Unhandled error during server startup:', error);
-  process.exit(1);
-});
 
-export { eventProcessor };
+
+setupShutdownHandlers();
+main();
+
+//export { eventProcessor };

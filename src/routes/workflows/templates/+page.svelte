@@ -1,7 +1,8 @@
 // routes/workflows/templates/+page.svelte
 <script>
   import { onMount } from 'svelte';
-  import { Plus, FolderOpen } from 'lucide-svelte';
+  import Plus from 'lucide-svelte/icons/plus';
+  import FolderOpen from 'lucide-svelte/icons/folder-open';
 
   let templates = [];
   let categories = [];

@@ -1,18 +1,15 @@
-//also called MainNavigation
-//
 
 <script>
+  //Main Navigation for Workflows
     import { page } from '$app/stores';
-    import { 
-      PencilSquare, 
-      Play, 
-      ClipboardList, 
-      Webhook, 
-      Activity,
-      ChartBar,
-      Cog,
-      Bell
-    } from 'lucide-svelte';
+    import PencilIcon from 'lucide-svelte/icons/pencil';
+    import Play from 'lucide-svelte/icons/play';
+    import ClipboardList from 'lucide-svelte/icons/clipboard-list';
+    import Webhook from 'lucide-svelte/icons/webhook';
+    import Activity from 'lucide-svelte/icons/activity';
+    import ChartBar from 'lucide-svelte/icons/chart-bar';
+    import Cog from 'lucide-svelte/icons/cog';
+    import Bell from 'lucide-svelte/icons/bell';
     
     let activeNotifications = 3;
     let currentWorkflow = null;
@@ -21,7 +18,7 @@
       {
         id: 'author',
         label: 'Author',
-        icon: PencilSquare,
+        icon: PencilIcon,
         path: '/workflows/author',
         description: 'Create and edit workflows'
       },
@@ -67,7 +64,7 @@
     <!-- Top Bar -->
     <div class="border-b px-4 py-2 flex items-center justify-between">
       <div class="flex items-center space-x-4">
-        <img src="/logo.svg" alt="Workflow Manager" class="h-8" />
+       Workflow Manager<br>
         
         {#if currentWorkflow}
           <div class="flex items-center space-x-2 text-sm">

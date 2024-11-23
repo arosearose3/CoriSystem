@@ -1,7 +1,8 @@
 // components/canvas/FlowEdge.svelte
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { Draw, Trash2 } from 'lucide-svelte';
+  import Draw from 'lucide-svelte/icons/pen';
+  import Trash2 from 'lucide-svelte/icons/trash-2';
 
   const dispatch = createEventDispatcher();
 

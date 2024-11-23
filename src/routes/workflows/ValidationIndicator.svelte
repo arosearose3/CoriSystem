@@ -1,5 +1,7 @@
 <script>
-    import { AlertCircle, CheckCircle } from 'lucide-svelte';
+  
+    import AlertCircle from 'lucide-svelte/icons/circle-alert';
+    import CheckCircle from 'lucide-svelte/icons/circle-check';
     
     export let node;
     export let showDetails = false;

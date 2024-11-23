@@ -1,7 +1,8 @@
-// routes/workflows/webhooks/+page.svelte
+
 <script>
   import { onMount } from 'svelte';
-  import { Webhook, Copy } from 'lucide-svelte';
+  import Webhook from 'lucide-svelte/icons/webhook';
+  import Copy from 'lucide-svelte/icons/copy';
 
   let webhooks = [];
   let selectedWebhook = null;

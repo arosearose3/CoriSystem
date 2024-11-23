@@ -1,7 +1,7 @@
 <script>
     import { createEventDispatcher } from 'svelte';
-/*     import Copy from 'lucide-svelte/icons/copy';
-    import Trash2 from 'lucide-svelte/icons/trash-2'; */
+    import Copy from 'lucide-svelte/icons/copy';
+    import Trash2 from 'lucide-svelte/icons/trash-2'; 
     import PickUI from './PickUI.svelte';
   
     export let field;

@@ -1,7 +1,8 @@
 // routes/workflows/active/+page.svelte
 <script>
   import { onMount } from 'svelte';
-  import { Activity, AlertCircle } from 'lucide-svelte';
+  import Activity from 'lucide-svelte/icons/activity';
+  import AlertCircle from 'lucide-svelte/icons/circle-alert';
 
   let activeWorkflows = [];
   let selectedWorkflow = null;

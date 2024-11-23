@@ -1,13 +1,12 @@
 <script>
     import { createEventDispatcher } from 'svelte';
-    import { 
-      ZoomIn, 
-      ZoomOut, 
-      MousePointer, 
-      Hand,
-      RotateCw,
-      Grid
-    } from 'lucide-svelte';
+    import ZoomIn from 'lucide-svelte/icons/zoom-in';
+    import ZoomOut from 'lucide-svelte/icons/zoom-out';
+    import MousePointer from 'lucide-svelte/icons/mouse-pointer';
+    import Hand from 'lucide-svelte/icons/hand';
+    import RotateCw from 'lucide-svelte/icons/rotate-cw';
+    import Grid from 'lucide-svelte/icons/grid';
+
   
     const dispatch = createEventDispatcher();
   

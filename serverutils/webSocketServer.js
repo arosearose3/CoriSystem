@@ -4,12 +4,12 @@ import { createLogger } from '../routes/EventProcessor/logger.js';
 
 export class WebSocketManager {
   constructor(server, logger) {
-    this.wss = new WebSocketServer({ server });
+    this.wss = new WebSocketServer({ server }); // Attach to HTTPS server
     this.logger = logger || createLogger({
       service: 'websocket-manager',
-      level: process.env.LOG_LEVEL || 'debug'
+      level: process.env.LOG_LEVEL || 'debug',
     });
-    this.clients = new Map(); // Map to store client connections
+    this.clients = new Map(); // Store client connections
     this.setupWebSocketServer();
   }
 
@@ -18,73 +18,53 @@ export class WebSocketManager {
       this.handleConnection(ws, req);
     });
 
-    // Handle server errors
     this.wss.on('error', (error) => {
       this.logger.error('WebSocket server error:', error);
     });
 
     // Periodically check for stale connections
-    setInterval(() => {
-      this.pingConnections();
-    }, 30000);
+    setInterval(() => this.pingConnections(), 30000);
   }
 
   handleConnection(ws, req) {
-    // Extract user information from the request
     const userId = this.getUserIdFromRequest(req);
-    
+
     if (!userId) {
       ws.close(1008, 'Authentication required');
       return;
     }
 
-    // Store client connection
     this.clients.set(userId, {
       ws,
       lastPing: Date.now(),
-      subscriptions: new Set()
+      subscriptions: new Set(),
     });
 
     this.logger.info(`Client connected: ${userId}`);
 
-    // Setup heartbeat
     ws.isAlive = true;
     ws.on('pong', () => {
       ws.isAlive = true;
     });
 
-    // Handle incoming messages
-    ws.on('message', (data) => {
-      this.handleMessage(userId, data);
-    });
+    ws.on('message', (data) => this.handleMessage(userId, data));
+    ws.on('close', () => this.handleDisconnect(userId));
 
-    // Handle client disconnect
-    ws.on('close', () => {
-      this.handleDisconnect(userId);
-    });
-
-    // Send welcome message
     this.sendToClient(userId, {
       type: 'connection',
       status: 'connected',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   }
 
   getUserIdFromRequest(req) {
-    // Extract user ID from session or token
-    // This should match your existing authentication method
-    if (req.session?.user?.id) {
-      return req.session.user.id;
-    }
-    // Add additional authentication methods as needed
-    return null;
+    // Extract user ID from session or authentication token
+    return req.session?.user?.id || null;
   }
 
   handleMessage(userId, data) {
     try {
       const message = JSON.parse(data);
-      
       switch (message.type) {
         case 'subscribe':
           this.handleSubscribe(userId, message);
@@ -102,7 +82,7 @@ export class WebSocketManager {
       this.logger.error('Error handling message:', error);
       this.sendToClient(userId, {
         type: 'error',
-        message: 'Invalid message format'
+        message: 'Invalid message format',
       });
     }
   }
@@ -113,7 +93,7 @@ export class WebSocketManager {
       client.subscriptions.add(message.resource);
       this.sendToClient(userId, {
         type: 'subscribed',
-        resource: message.resource
+        resource: message.resource,
       });
     }
   }
@@ -124,7 +104,7 @@ export class WebSocketManager {
       client.subscriptions.delete(message.resource);
       this.sendToClient(userId, {
         type: 'unsubscribed',
-        resource: message.resource
+        resource: message.resource,
       });
     }
   }
@@ -147,13 +127,11 @@ export class WebSocketManager {
       if (ws.isAlive === false) {
         return ws.terminate();
       }
-      
       ws.isAlive = false;
       ws.ping();
     });
   }
 
-  // Send message to specific client
   sendToClient(userId, message) {
     const client = this.clients.get(userId);
     if (client && client.ws.readyState === WebSocket.OPEN) {
@@ -161,7 +139,6 @@ export class WebSocketManager {
     }
   }
 
-  // Broadcast message to all clients
   broadcast(message, filter = null) {
     this.clients.forEach((client, userId) => {
       if (!filter || filter(userId, client)) {
@@ -170,14 +147,13 @@ export class WebSocketManager {
     });
   }
 
-  // Send message to subscribers of a specific resource
   notifySubscribers(resource, message) {
     this.clients.forEach((client, userId) => {
       if (client.subscriptions.has(resource)) {
         this.sendToClient(userId, {
           type: 'update',
           resource,
-          data: message
+          data: message,
         });
       }
     });

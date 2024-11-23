@@ -1,12 +1,10 @@
 <script>
-    import { 
-      CheckCircle2, 
-      XCircle,
-      Clock,
-      ArrowRight,
-      ChevronDown,
-      ChevronUp 
-    } from 'lucide-svelte';
+    import CheckCircle2 from 'lucide-svelte/icons/circle-check';
+    import XCircle from 'lucide-svelte/icons/circle-x';
+    import Clock from 'lucide-svelte/icons/clock';
+    import ArrowRight from 'lucide-svelte/icons/arrow-right';
+    import ChevronDown from 'lucide-svelte/icons/chevron-down';
+    import ChevronUp from 'lucide-svelte/icons/chevron-up';
     
     export let testResults = [];
     

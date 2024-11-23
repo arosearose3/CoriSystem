@@ -25,5 +25,6 @@ vite.config.ts.timestamp-*
 service-account-key.json
 service-account-key-rosters.json
 
-certs
+/certs
+/.certs
 

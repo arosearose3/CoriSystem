@@ -1,7 +1,11 @@
 // components/testing/WorkflowSimulator.svelte
 <script>
   import { createEventDispatcher } from 'svelte';
-  import { Play, Pause, RotateCw, AlertCircle } from 'lucide-svelte';
+  import Play from 'lucide-svelte/icons/play';
+  import Pause from 'lucide-svelte/icons/pause';
+  import RotateCw from 'lucide-svelte/icons/rotate-cw';
+  import AlertCircle from 'lucide-svelte/icons/circle-alert';
+
   import { workflowStore } from '$lib/stores/workflow';
   
   const dispatch = createEventDispatcher();

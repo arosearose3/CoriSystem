@@ -1,6 +1,9 @@
 // routes/workflows/test/+page.svelte
 <script>
-  import { Play, Bug, List } from 'lucide-svelte';
+import Play from 'lucide-svelte/icons/play';
+import Bug from 'lucide-svelte/icons/bug';
+import List from 'lucide-svelte/icons/list';
+
   import WorkflowSimulator from '../WorkflowSimulator.svelte';
   import TestResults from '../TestResults.svelte';
 

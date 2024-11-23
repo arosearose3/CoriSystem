@@ -16,22 +16,22 @@
     $: properties = element ? getPropertiesForType(element.type) : [];
   
     function getPropertiesForType(type) {
-      switch(type) {
-        case 'webhook':
-          return [
-            { key: 'url', type: 'text', label: 'Webhook URL' },
-            { key: 'method', type: 'select', label: 'HTTP Method', options: ['POST', 'PUT'] }
-          ];
-        case 'timer':
-          return [
-            { key: 'schedule', type: 'text', label: 'Schedule' },
-            { key: 'repeat', type: 'boolean', label: 'Repeat' }
-          ];
-        // ... other types
-        default:
-          return [];
-      }
+    switch (type) {
+      case 'webhook':
+        return [
+          { key: 'url', type: 'text', label: 'Webhook URL' },
+          { key: 'method', type: 'select', label: 'HTTP Method', options: [{ value: 'POST', label: 'POST' }, { value: 'PUT', label: 'PUT' }] },
+        ];
+      case 'timer':
+        return [
+          { key: 'schedule', type: 'text', label: 'Schedule' },
+          { key: 'repeat', type: 'boolean', label: 'Repeat' },
+        ];
+      // ... other types
+      default:
+        return [];
     }
+  }
   </script>
   
   <div class="h-full p-4 bg-gray-50">
@@ -43,7 +43,7 @@
           key={prop.key}
           type={prop.type}
           label={prop.label}
-          value={element[prop.key]}
+          value={element[prop.key] ?? ''}
           options={prop.options}
           on:change={e => updateProperty(prop.key, e.detail)}
         />
