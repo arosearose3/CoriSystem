@@ -16,6 +16,9 @@
   $: {
     console.log('Canvas: Workflow updated:', workflow);
     console.log('Canvas: Number of nodes:', workflow?.nodes?.length);
+    workflow?.nodes?.forEach(node => {
+      console.log('Node:', node.id, node.type, node.position);
+    });
   }
 
   onMount(() => {
@@ -27,6 +30,49 @@
       selectedElementStore.set(null);
     }
   }
+  function handleContainerDragOver(event, nodeId) {
+  if (!event.target.closest('.container-zone')) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+}
+
+function handleContainerDrop(event, containerId) {
+  if (!event.target.closest('.container-zone')) return;
+  event.preventDefault();
+  event.stopPropagation();
+
+  try {
+    let data;
+    try {
+      const jsonData = event.dataTransfer.getData('application/json');
+      data = JSON.parse(jsonData);
+    } catch (err) {
+      const textData = event.dataTransfer.getData('text/plain');
+      data = JSON.parse(textData);
+    }
+
+    if (!data || data.isContainer) {
+      console.error('Invalid drop data or attempted to drop container into container');
+      return;
+    }
+
+    const childNode = {
+      id: `child-${Date.now()}`,
+      type: data.type,
+      label: data.title,
+      data: {
+        ...data,
+        type: data.type,
+        title: data.title,
+        properties: data.properties || {}
+      }
+    };
+
+    workflowStore.addChildToContainer(containerId, childNode);
+  } catch (error) {
+    console.error('Error handling container drop:', error);
+  }
+}
 
   function handleNodeDragStart(event) {
     const { nodeId } = event.detail;
@@ -53,62 +99,70 @@
   }
 
   async function handleDrop(event) {
-    event.preventDefault();
-    isDragOver = false;
-    
-    try {
-      let data;
-      try {
-        const jsonData = event.dataTransfer.getData('application/json');
-        data = JSON.parse(jsonData);
-      } catch (err) {
-        const textData = event.dataTransfer.getData('text/plain');
-        data = JSON.parse(textData);
-      }
-
-      if (!data) {
-        console.error('No valid data in drop event');
-        return;
-      }
-
-      const rect = canvasEl.getBoundingClientRect();
-      const scrollPos = {
-        x: canvasEl.scrollLeft || 0,
-        y: canvasEl.scrollTop || 0
-      };
-      
-      const position = {
-        x: Math.round(event.clientX - rect.left + scrollPos.x),
-        y: Math.round(event.clientY - rect.top + scrollPos.y)
-      };
-
-      const newNode = {
-        id: `node-${Date.now()}`,
-        type: data.isEvent ? 'event' : 'activity',
-        position,
-        label: data.title,
-        data: {
-          ...data,
-          type: data.type,
-          title: data.title,
-          properties: data.properties || {}
-        },
-        width: 200,
-        height: 80,
-        ports: {
-          input: [{ id: 'input-1', type: 'input' }],
-          output: [{ id: 'output-1', type: 'output' }]
-        }
-      };
-
-      console.log('Canvas: Creating node:', newNode);
-      await workflowStore.addNode(newNode);
-      workflowStore.update();
-      
-    } catch (error) {
-      console.error('Error in drop handler:', error);
-    }
+  event.preventDefault();
+  isDragOver = false;
+  
+  // If the drop target is inside a container node, skip canvas handling
+  if (event.target.closest('.container-zone')) {
+    return;
   }
+  
+  try {
+    let data;
+    try {
+      const jsonData = event.dataTransfer.getData('application/json');
+      data = JSON.parse(jsonData);
+    } catch (err) {
+      const textData = event.dataTransfer.getData('text/plain');
+      data = JSON.parse(textData);
+    }
+
+    if (!data) {
+      console.error('No valid data in drop event');
+      return;
+    }
+
+    const rect = canvasEl.getBoundingClientRect();
+    const scrollPos = {
+      x: canvasEl.scrollLeft || 0,
+      y: canvasEl.scrollTop || 0
+    };
+    
+    const position = {
+      x: Math.round(event.clientX - rect.left + scrollPos.x),
+      y: Math.round(event.clientY - rect.top + scrollPos.y)
+    };
+
+    const newNode = {
+      id: `node-${Date.now()}`,
+      type: data.type, // Use the actual type for containers
+      position,
+      label: data.title,
+      data: {
+        ...data,
+        type: data.type,
+        title: data.title,
+        properties: data.properties || {}
+      },
+      width: data.isContainer ? 300 : 200, // Wider for containers
+      height: data.isContainer ? 200 : 80, // Taller for containers
+      ports: {
+        input: [{ id: 'input-1', type: 'input' }],
+        output: [{ id: 'output-1', type: 'output' }]
+      },
+      // Add container-specific properties
+      isContainer: data.isContainer,
+      children: [] // Initialize empty children array for containers
+    };
+
+    console.log('Canvas: Creating node:', newNode);
+    await workflowStore.addNode(newNode);
+    workflowStore.update();
+    
+  } catch (error) {
+    console.error('Error in drop handler:', error);
+  }
+}
 
   function handlePortDragStart(event) {
     const { nodeId, portType, portElement } = event.detail;
@@ -246,7 +300,7 @@
     </svg>
 
     <div class="node-layer">
-      {#if workflow?.nodes?.length > 0}
+      {#if workflow?.nodes?.length}
         {#each workflow.nodes as node (node.id)}
           <FlowNode 
             {node}
@@ -254,8 +308,13 @@
             on:nodemove={handleNodeMove}
             on:dragstart={handleNodeDragStart}
             on:dragend={handleNodeDragEnd}
+            on:addchild={({ detail }) => workflowStore.addChildToContainer(detail.parentId, detail.child)}
+            on:removechild={({ detail }) => workflowStore.removeChildFromContainer(detail.parentId, detail.childId)}
+            on:removenode={({ detail }) => workflowStore.removeNode(detail.nodeId)}
           />
         {/each}
+      {:else}
+        <div class="empty-state">Drag activities or events here</div>
       {/if}
     </div>
   </div>
@@ -299,8 +358,8 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: 2;
   }
+
 
   .node-layer > :global(*) {
     pointer-events: auto;
@@ -313,4 +372,43 @@
   .drag-line {
     pointer-events: none;
   }
+  :global(.container-zone) {
+    background: rgba(255, 255, 255, 0.8);
+    border: 2px dashed #ccc;
+    border-radius: 4px;
+    margin: 10px;
+    min-height: 100px;
+    padding: 10px;
+    transition: all 0.2s ease;
+  }
+
+  :global(.container-zone.drag-over) {
+    background: rgba(74, 144, 226, 0.1);
+    border-color: #4A90E2;
+  }
+
+  .empty-state {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: #666;
+    font-style: italic;
+  }
+
+  .connection-layer {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .canvas.is-drag-over {
+    background: #e8f4fd;
+    border: 2px dashed #4A90E2;
+  }
+  
 </style>

@@ -129,7 +129,31 @@
           }
         }
       ]
+    },
+    {
+  name: 'Flow Control',
+  description: 'Workflow control activities',
+  items: [
+    {
+      type: 'parallel',
+      title: 'Parallel Flow',
+      properties: {
+        name: { type: 'string', label: 'Name', required: true },
+        description: { type: 'string', label: 'Description' }
+      },
+      isContainer: true
+    },
+    {
+      type: 'sequence',
+      title: 'Sequential Flow',
+      properties: {
+        name: { type: 'string', label: 'Name', required: true },
+        description: { type: 'string', label: 'Description' }
+      },
+      isContainer: true
     }
+  ]
+}
   ];
 
   function handleDragStart(event, item) {
