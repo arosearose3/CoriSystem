@@ -12,6 +12,20 @@
       y: node.position.y
     };
   
+
+    let isContainer = node.type === 'parallel' || node.type === 'sequence';
+    let dropTarget = null;
+
+
+/*     $: {
+    if (!isDragging) {
+      position = {
+        x: node.position.x,
+        y: node.position.y
+      };
+    }
+  } */
+
     $: {
     if (!isDragging && node.position) {
         // Only update from props if we're not the ones who just finished dragging
@@ -23,6 +37,49 @@
         }
     }
 }
+
+function handleContainerDragOver(event) {
+    if (!isContainer) return;
+    event.preventDefault();
+    dropTarget = event.target;
+    event.dataTransfer.dropEffect = 'copy';
+  }
+
+  async function handleContainerDrop(event) {
+    if (!isContainer) return;
+    event.preventDefault();
+    event.stopPropagation(); // Stop event from bubbling to canvas
+    dropTarget = null;
+
+    try {
+      const data = JSON.parse(
+        event.dataTransfer.getData('application/json') ||
+        event.dataTransfer.getData('text/plain')
+      );
+
+      // Only accept activity types
+      if (data.type !== 'activity') return;
+
+      // Create child activity without position (containers manage layout)
+      const child = {
+        id: `activity-${Date.now()}`,
+        type: 'activity',
+        label: data.title,
+        parentId: node.id,
+        data: {
+          ...data,
+          title: data.title
+        }
+      };
+
+      dispatch('addchild', {
+        parentId: node.id,
+        child
+      });
+    } catch (err) {
+      console.error('Error handling container drop:', err);
+    }
+  }
 
   function handleNodeMouseDown(event) {
     if (event.target.classList.contains('port')) {
@@ -101,15 +158,49 @@ onDestroy(() => {
   </script>
   
   <div
-    bind:this={nodeEl}
-    class="node"
-    style="transform: translate({position.x}px, {position.y}px);"
-    on:mousedown={handleNodeMouseDown}
-  >
+  bind:this={nodeEl}
+  class="node"
+  class:is-container={isContainer}
+  style="transform: translate({position.x}px, {position.y}px);"
+  on:mousedown={handleNodeMouseDown}
+>
     <div class="node-content">
       <h4 class="node-title">{node.label}</h4>
-    </div>
+       <!-- Container drop zone -->
+       {#if isContainer}
+       <div 
+       class="container-zone"
+       class:is-parallel={node.type === 'parallel'}
+       class:is-sequence={node.type === 'sequence'}
+       on:dragover|stopPropagation={handleContainerDragOver}
+       on:dragleave|stopPropagation={() => dropTarget = null}
+       on:drop|stopPropagation={handleContainerDrop}
+     >
+         {#if node.children?.length}
+           {#each node.children as child}
+             <div class="container-child">
+               <span>{child.label}</span>
+               <button 
+                 class="remove-child"
+                 on:click={() => dispatch('removechild', { 
+                   parentId: node.id, 
+                   childId: child.id 
+                 })}
+               >×</button>
+             </div>
+           {/each}
+         {:else}
+           <div class="drop-placeholder">
+             Drop Activities Here
+           </div>
+         {/if}
+       </div>
+     {/if}
+   </div>
   
+
+
+    
     <div 
     class="port port-input"
     data-node-id={node.id}
@@ -173,4 +264,30 @@ onDestroy(() => {
     .port:hover {
       background-color: #357ABD;
     }
+    .container-zone {
+    margin: 1rem;
+    padding: 1rem;
+    border: 2px dashed #ccc;
+    border-radius: 4px;
+    min-height: 100px;
+    background: rgba(255, 255, 255, 0.9); /* Make drop zone stand out */
+  }
+
+  .container-child {
+    padding: 0.5rem;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0.25rem 0;
+  }
+
+  /* Add visual feedback for drag over */
+  .container-zone.drag-over {
+    background: rgba(59, 130, 246, 0.1);
+    border-color: #3b82f6;
+  }
+  
   </style>

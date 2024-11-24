@@ -41,6 +41,11 @@
     event.preventDefault();
     isDragOver = false;
     
+    // If the drop target is inside a container node, skip canvas handling
+    if (event.target.closest('.container-zone')) {
+      return;
+    }
+    
     try {
       const dataStr = event.dataTransfer.getData('application/json') || 
                      event.dataTransfer.getData('text/plain');
@@ -62,7 +67,6 @@
         }
       };
       
-      console.log('Adding new node:', newNode); // Debug node addition
       workflowStore.addNode(newNode);
     } catch (err) {
       console.error('Error handling drop:', err);
