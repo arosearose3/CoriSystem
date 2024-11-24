@@ -1,8 +1,48 @@
 <script>
   import { createEventDispatcher } from 'svelte';
+  import { workflowStore, selectedElementStore } from '$lib/stores/workflow';
   import { fly } from 'svelte/transition';
-  
+
+  import { slide } from 'svelte/transition';
+
   const dispatch = createEventDispatcher();
+
+  let propertyValues = {};
+  let propertyAssignments = {};
+  let propertyPaths = {};
+  let customFhirPath = '';
+  let customFhirPathName = '';
+  let selectedProperties = new Map();
+
+
+
+  $: if ($selectedElementStore) {
+    selectedProperties = new Map($selectedElementStore.properties || []);
+  }
+
+  $: if ($selectedElementStore) {
+    propertyValues = {};
+    propertyAssignments = {};
+    propertyPaths = {};
+    
+    // Convert Map to regular objects for easier binding
+    $selectedElementStore.properties?.forEach((value, key) => {
+      if (key.startsWith('value-')) {
+        propertyValues[key.replace('value-', '')] = value;
+      } else if (key.startsWith('assignment-')) {
+        propertyAssignments[key.replace('assignment-', '')] = value;
+      } else if (key.startsWith('path-')) {
+        propertyPaths[key.replace('path-', '')] = value;
+      }
+    });
+  }
+
+  $: activityProperties = $selectedElementStore ? 
+  getPropertiesForActivity($selectedElementStore.data?.type) : {};
+
+  $: console.log('Selected element:', $selectedElementStore);
+  $: console.log('Activity properties:', activityProperties);
+
 
   // Property sections with example properties
   const propertySections = {
@@ -10,36 +50,102 @@
       title: "Set Now",
       description: "Static values set during design",
       properties: [
-        { id: 'priority', label: 'Priority', type: 'string', value: 'high', source: 'design' },
-        { id: 'category', label: 'Category', type: 'string', value: 'clinical', source: 'design' },
-        { id: 'retry', label: 'Retry Count', type: 'number', value: 3, source: 'design' }
+        { 
+          id: 'priority', 
+          label: 'Priority', 
+          type: 'string',
+          source: 'design',  // Added back
+          currentValue: '',
+          defaultValue: 'high' 
+        },
+        { 
+          id: 'category', 
+          label: 'Category', 
+          type: 'string',
+          source: 'design',  // Added back
+          currentValue: '',
+          defaultValue: 'clinical' 
+        },
+        { 
+          id: 'retry', 
+          label: 'Retry Count', 
+          type: 'number',
+          source: 'design',  // Added back
+          currentValue: '',
+          defaultValue: 3 
+        }
       ]
     },
     whenChosen: {
       title: "When Chosen",
       description: "Values set at workflow activation",
       properties: [
-        { id: 'assignedTeam', label: 'Assigned Team', type: 'string', source: 'activation' },
-        { id: 'department', label: 'Department', type: 'string', source: 'activation' },
-        { id: 'location', label: 'Location', type: 'string', source: 'activation' }
+        { 
+          id: 'assignedTeam', 
+          label: 'Assigned Team', 
+          type: 'string',
+          source: 'activation'  // Added back
+        },
+        { 
+          id: 'department', 
+          label: 'Department', 
+          type: 'string',
+          source: 'activation'  // Added back
+        },
+        { 
+          id: 'location', 
+          label: 'Location', 
+          type: 'string',
+          source: 'activation'  // Added back
+        }
       ]
     },
     userLoggedIn: {
       title: "User Logged In",
       description: "Values from authenticated user",
       properties: [
-        { id: 'practitionerId', label: 'Practitioner ID', type: 'string', source: 'user-context' },
-        { id: 'role', label: 'Role', type: 'string', source: 'user-context' },
-        { id: 'organization', label: 'Organization', type: 'string', source: 'user-context' }
+        { 
+          id: 'practitionerId', 
+          label: 'Practitioner ID', 
+          type: 'string',
+          source: 'user-context'  // Added back
+        },
+        { 
+          id: 'role', 
+          label: 'Role', 
+          type: 'string',
+          source: 'user-context'  // Added back
+        },
+        { 
+          id: 'organization', 
+          label: 'Organization', 
+          type: 'string',
+          source: 'user-context'  // Added back
+        }
       ]
     },
     noUser: {
       title: "System Context",
       description: "Values from system configuration",
       properties: [
-        { id: 'apiEndpoint', label: 'API Endpoint', type: 'string', source: 'system-context' },
-        { id: 'systemId', label: 'System ID', type: 'string', source: 'system-context' },
-        { id: 'timeout', label: 'Timeout', type: 'number', source: 'system-context' }
+        { 
+          id: 'apiEndpoint', 
+          label: 'API Endpoint', 
+          type: 'string',
+          source: 'system-context'  // Added back
+        },
+        { 
+          id: 'systemId', 
+          label: 'System ID', 
+          type: 'string',
+          source: 'system-context'  // Added back
+        },
+        { 
+          id: 'timeout', 
+          label: 'Timeout', 
+          type: 'number',
+          source: 'system-context'  // Added back
+        }
       ]
     },
     fromEvent: {
@@ -49,42 +155,85 @@
         { 
           id: 'patientId', 
           label: 'Patient ID', 
-          type: 'string', 
-          source: 'event-context',
-          expression: 'Patient.id' 
+          type: 'string',
+          source: 'event-context',  // Added back
+          expression: 'Patient.id'
         },
         { 
           id: 'encounterId', 
           label: 'Encounter ID', 
-          type: 'string', 
-          source: 'event-context',
-          expression: 'Encounter.id' 
+          type: 'string',
+          source: 'event-context',  // Added back
+          expression: 'Encounter.id'
         },
         {
           id: 'status',
           label: 'Status',
           type: 'string',
-          source: 'event-context',
+          source: 'event-context',  // Added back
           expression: 'Resource.status'
         }
       ]
     }
   };
 
-  let customFhirPath = '';
-  let customFhirPathName = '';
-  let selectedProperties = new Set();
-  let draggedProperty = null;
 
-  function handlePropertyToggle(sectionId, propertyId) {
-    const key = `${sectionId}-${propertyId}`;
+
+  function updateProperty(propKey, type, value) {
+    if (!$selectedElementStore) return;
+
+    const prefix = type === 'value' ? 'value-' :
+                  type === 'assignment' ? 'assignment-' : 'path-';
+    
+    // Update local state
+    if (type === 'value') propertyValues[propKey] = value;
+    if (type === 'assignment') propertyAssignments[propKey] = value;
+    if (type === 'path') propertyPaths[propKey] = value;
+
+    // Update store
+    const newProperties = new Map($selectedElementStore.properties || new Map());
+    newProperties.set(`${prefix}${propKey}`, value);
+
+    workflowStore.updateNodeProperties($selectedElementStore.id, newProperties);
+  }
+
+
+
+
+  function handlePropertyToggle(sectionId, property) {
+    const key = `${sectionId}-${property.id}`;
     if (selectedProperties.has(key)) {
       selectedProperties.delete(key);
     } else {
-      selectedProperties.add(key);
+      selectedProperties.set(key, {
+        ...property,
+        value: property.currentValue || property.defaultValue
+      });
     }
-    selectedProperties = selectedProperties; // Trigger reactivity
-    dispatch('propertiesChange', { selectedProperties });
+    
+    // Update the workflow store with new properties
+    if ($selectedElementStore) {
+      workflowStore.updateNodeProperties($selectedElementStore.id, selectedProperties);
+    }
+  }
+
+  function handleValueChange(sectionId, property, event) {
+    const key = `${sectionId}-${property.id}`;
+    const newValue = property.type === 'number' ? 
+      Number(event.target.value) : event.target.value;
+    
+    property.currentValue = newValue;
+    
+    if (selectedProperties.has(key)) {
+      selectedProperties.set(key, {
+        ...property,
+        value: newValue
+      });
+      
+      if ($selectedElementStore) {
+        workflowStore.updateNodeProperties($selectedElementStore.id, selectedProperties);
+      }
+    }
   }
 
   function handleAddFhirPath() {
@@ -107,120 +256,119 @@
     customFhirPathName = '';
   }
 
-  function handleDragStart(event, property, sectionId) {
-    draggedProperty = { ...property, sectionId };
-    event.dataTransfer.effectAllowed = 'copy';
-    event.dataTransfer.setData('application/json', JSON.stringify(draggedProperty));
-    
-    // Add custom drag image/ghost element
-    const ghost = event.target.cloneNode(true);
-    ghost.classList.add('dragging-ghost');
-    document.body.appendChild(ghost);
-    event.dataTransfer.setDragImage(ghost, 0, 0);
-    setTimeout(() => document.body.removeChild(ghost), 0);
-    
-    event.target.classList.add('dragging');
+  function getPropertiesForActivity(activityType) {
+    // This would come from your activity definitions
+    const allActivities = [
+      // Flatten your activity categories to get all activities
+      ...categories.flatMap(cat => cat.items)
+    ];
+    return allActivities.find(a => a.type === activityType)?.properties || {};
   }
 
-  function handleDragEnd(event) {
-    event.target.classList.remove('dragging');
-    draggedProperty = null;
-  }
+
 </script>
-
 <div class="property-panel">
-  <!-- Property Sections -->
-  {#each Object.entries(propertySections) as [sectionId, section]}
-    <div class="section bg-white rounded-lg shadow-sm p-4 mb-4">
-      <h3 class="text-lg font-semibold text-gray-800 mb-2">{section.title}</h3>
-      <p class="text-sm text-gray-600 mb-3">{section.description}</p>
-      
-      <div class="property-chips flex flex-wrap gap-2">
-        {#each section.properties as property}
-          <div
-            class="property-chip group"
-            draggable="true"
-            on:dragstart={(e) => handleDragStart(e, property, sectionId)}
-            on:dragend={handleDragEnd}
-          >
-            <div class="flex items-center p-2 bg-white rounded-lg border border-gray-200 
-                        shadow-sm hover:shadow-md transition-all cursor-move group-hover:border-blue-400">
-              <input
-                type="checkbox"
-                class="form-checkbox h-4 w-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
-                checked={selectedProperties.has(`${sectionId}-${property.id}`)}
-                on:change={() => handlePropertyToggle(sectionId, property.id)}
-              />
-              <span class="ml-2 text-sm font-medium text-gray-700">{property.label}</span>
-              {#if property.expression}
-                <span class="ml-2 text-xs text-gray-500 italic">{property.expression}</span>
-              {/if}
-              <div class="ml-2 px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">
-                {property.type}
-              </div>
-            </div>
-          </div>
-        {/each}
-      </div>
+  {#if $selectedElementStore}
+    <div class="p-4 border-b border-gray-200">
+      <h2 class="text-lg font-semibold">{$selectedElementStore.data?.title || 'Properties'}</h2>
+      <p class="text-sm text-gray-600">Configure activity properties</p>
+    </div>
 
-      <!-- FHIRPath input for Event section -->
-      {#if sectionId === 'fromEvent'}
-        <div class="mt-4 space-y-2">
-          <input
-            type="text"
-            class="w-full px-3 py-2 border rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
-            placeholder="Property name"
-            bind:value={customFhirPathName}
-          />
-          <div class="flex items-center gap-2">
-            <input
-              type="text"
-              class="flex-1 px-3 py-2 border rounded-md text-sm font-mono
-                     focus:ring-blue-500 focus:border-blue-500"
-              placeholder="FHIRPath expression (e.g. Patient.name.given.first())"
-              bind:value={customFhirPath}
-            />
-            <button
-              class="p-2 text-blue-600 hover:bg-blue-50 rounded-md
-                     disabled:opacity-50 disabled:cursor-not-allowed"
-              on:click={handleAddFhirPath}
-              disabled={!customFhirPath || !customFhirPathName}
+    {#if Object.keys(activityProperties).length > 0}
+      {#each Object.entries(activityProperties) as [propKey, propConfig]}
+        <div class="p-4 border-b border-gray-200" transition:slide>
+          <div class="flex items-center justify-between mb-2">
+            <label class="text-sm font-medium text-gray-700">
+              {propConfig.label}
+              {#if propConfig.required}
+                <span class="text-red-500">*</span>
+              {/if}
+            </label>
+          </div>
+
+          <div class="space-y-2">
+            <!-- Property Assignment Type Selection -->
+            <select 
+              class="w-full p-2 border rounded-md text-sm"
+              value={propertyAssignments[propKey] || 'design'}
+              on:change={(e) => updateProperty(propKey, 'assignment', e.target.value)}
             >
-              <svg class="w-5 h-5" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" 
-                      d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" 
-                      clip-rule="evenodd" />
-              </svg>
-            </button>
+              <option value="design">Set Now</option>
+              <option value="activation">Set at Activation</option>
+              <option value="runtime">Set at Runtime</option>
+            </select>
+
+            <!-- Value input if "Set Now" is selected -->
+            {#if propertyAssignments[propKey] === 'design'}
+              {#if propConfig.options}
+                <select 
+                  class="w-full p-2 border rounded-md text-sm"
+                  value={propertyValues[propKey] || ''}
+                  on:change={(e) => updateProperty(propKey, 'value', e.target.value)}
+                >
+                  <option value="">Select {propConfig.label}</option>
+                  {#each propConfig.options as option}
+                    <option value={option}>{option}</option>
+                  {/each}
+                </select>
+              {:else if propConfig.type === 'number'}
+                <input 
+                  type="number"
+                  class="w-full p-2 border rounded-md text-sm"
+                  value={propertyValues[propKey] || ''}
+                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
+                />
+              {:else if propConfig.type === 'date'}
+                <input 
+                  type="date"
+                  class="w-full p-2 border rounded-md text-sm"
+                  value={propertyValues[propKey] || ''}
+                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
+                />
+              {:else}
+                <input 
+                  type="text"
+                  class="w-full p-2 border rounded-md text-sm"
+                  placeholder={`Enter ${propConfig.label.toLowerCase()}`}
+                  value={propertyValues[propKey] || ''}
+                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
+                />
+              {/if}
+            {/if}
+
+            <!-- Runtime configuration if "Set at Runtime" is selected -->
+            {#if propertyAssignments[propKey] === 'runtime'}
+              <input 
+                type="text"
+                class="w-full p-2 border rounded-md text-sm"
+                placeholder="Enter runtime path (e.g. %event.patientId)"
+                value={propertyPaths[propKey] || ''}
+                on:input={(e) => updateProperty(propKey, 'path', e.target.value)}
+              />
+            {/if}
           </div>
         </div>
-      {/if}
+      {/each}
+    {:else}
+      <div class="p-4 text-gray-500">
+        No configurable properties for this element
+      </div>
+    {/if}
+  {:else}
+    <div class="p-4 text-gray-500">
+      Select a node to view properties
     </div>
-  {/each}
+  {/if}
 </div>
 
 <style>
   .property-panel {
-    @apply p-4 h-full overflow-y-auto bg-gray-50;
+    height: 100%;
+    overflow-y: auto;
+    background-color: #f9fafb;
   }
 
-  .property-chip {
-    @apply transition-transform duration-200;
-  }
-
-  .property-chip.dragging {
-    @apply opacity-50;
-  }
-
-  .property-chip:hover {
-    @apply transform -translate-y-0.5;
-  }
-
-  .dragging-ghost {
-    @apply fixed opacity-0 pointer-events-none;
-  }
-
-  /* Custom scrollbar styling */
+  /* Scrollbar styling */
   .property-panel {
     scrollbar-width: thin;
     scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
@@ -239,14 +387,7 @@
     border-radius: 3px;
   }
 
-  /* Animations */
-  @keyframes pop {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-  }
-
-  .property-chip:active {
-    animation: pop 0.3s ease-in-out;
+  .section:last-child {
+    border-bottom: none;
   }
 </style>

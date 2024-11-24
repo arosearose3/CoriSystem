@@ -1,42 +1,58 @@
 <script>
     import { createEventDispatcher, onDestroy } from 'svelte';
-    
+    import X from 'lucide-svelte/icons/x';
+    import { selectedElementStore } from '$lib/stores/workflow';
+
+
+    import { fade, fly } from 'svelte/transition';
+
     export let node;
+    export let apiProperties = [];
+    export let selected = false;
+
+
     const dispatch = createEventDispatcher();
-  
+  let assignedProperties = new Map();
+
     let nodeEl;
     let isDragging = false;
     let dragStart = { x: 0, y: 0 };
     let position = {
-      x: node.position.x,
-      y: node.position.y
-    };
+    x: node?.position?.x || 0,
+    y: node?.position?.y || 0
+  };
   
 
     let isContainer = node.type === 'parallel' || node.type === 'sequence';
     let dropTarget = null;
 
+    let width = node?.width || 200;
+    let height = node?.height || 80;
 
-/*     $: {
-    if (!isDragging) {
+
+
+  $: {
+    if (!isDragging && node?.position) {
       position = {
         x: node.position.x,
         y: node.position.y
       };
     }
-  } */
+ }
 
-    $: {
-    if (!isDragging && node.position) {
-        // Only update from props if we're not the ones who just finished dragging
-        if (position.x !== node.position.x || position.y !== node.position.y) {
-            position = {
-                x: node.position.x,
-                y: node.position.y
-            };
-        }
+
+function handleNodeClick(event) {
+    // Only handle click if it's not a drag event
+    if (!isDragging) {
+      event.stopPropagation();
+      selectedElementStore.set({
+        id: node.id,
+        type: node.type,
+        properties: node.properties,
+        data: node.data
+      });
     }
-}
+  }
 
 function handleContainerDragOver(event) {
     if (!isContainer) return;
@@ -46,74 +62,133 @@ function handleContainerDragOver(event) {
   }
 
   async function handleContainerDrop(event) {
-    if (!isContainer) return;
-    event.preventDefault();
-    event.stopPropagation(); // Stop event from bubbling to canvas
-    dropTarget = null;
+  if (!isContainer) return;
+  event.preventDefault();
+  event.stopPropagation(); // Stop event from bubbling to canvas
+  dropTarget = null;
 
+  try {
+    let data;
     try {
-      const data = JSON.parse(
-        event.dataTransfer.getData('application/json') ||
-        event.dataTransfer.getData('text/plain')
-      );
-
-      // Only accept activity types
-      if (data.type !== 'activity') return;
-
-      // Create child activity without position (containers manage layout)
-      const child = {
-        id: `activity-${Date.now()}`,
-        type: 'activity',
-        label: data.title,
-        parentId: node.id,
-        data: {
-          ...data,
-          title: data.title
-        }
-      };
-
-      dispatch('addchild', {
-        parentId: node.id,
-        child
-      });
+      // Try application/json first
+      const jsonData = event.dataTransfer.getData('application/json');
+      data = JSON.parse(jsonData);
     } catch (err) {
-      console.error('Error handling container drop:', err);
+      // Fallback to text/plain
+      const textData = event.dataTransfer.getData('text/plain');
+      data = JSON.parse(textData);
     }
+
+    if (!data) {
+      console.error('No valid data in drop event');
+      return;
+    }
+
+    // Create child activity
+    const child = {
+      id: `activity-${Date.now()}`,
+      type: data.type,
+      label: data.title,
+      parentId: node.id,
+      data: {
+        ...data,
+        title: data.title
+      }
+    };
+
+    console.log('Adding child to container:', child);
+    dispatch('addchild', {
+      parentId: node.id,
+      child: child
+    });
+  } catch (err) {
+    console.error('Error handling container drop:', err);
   }
+}
 
   function handleNodeMouseDown(event) {
-    if (event.target.classList.contains('port')) {
-        return;
+    // Don't handle selection if clicking property chip or port
+    if (event.target.closest('.property-chip') || 
+        event.target.closest('.property-slot') ||
+        event.target.closest('.port')) {
+      return;
     }
 
     event.stopPropagation();
-    isDragging = true;
-    
-    // Calculate offset from node's current position
+    isDragging = false;
     dragStart = {
-        x: event.clientX - position.x,
-        y: event.clientY - position.y
+      x: event.clientX - position.x,
+      y: event.clientY - position.y
     };
 
-    dispatch('dragstart', { nodeId: node.id });
-    
-    // Add handlers to window
+    // Add small delay to differentiate click from drag
+    setTimeout(() => {
+      if (!isDragging) {
+        handleNodeClick(event);
+      }
+    }, 150);
+
     window.addEventListener('mousemove', handleNodeMouseMove);
     window.addEventListener('mouseup', handleNodeMouseUp);
-}
-
-  function handlePortMouseDown(event, portType) {
-    event.stopPropagation(); // Prevent node drag
-    event.preventDefault();
-
-    dispatch('portdragstart', {
-      nodeId: node.id,
-      portType,
-      portElement: event.target
-    });
   }
 
-  
+function handlePortMouseDown(event, portType) {
+        event.stopPropagation();
+        event.preventDefault();
+        
+        if (event.target.closest('.property-chip') || 
+            event.target.closest('.property-slot')) {
+            return;
+        }
+
+        dispatch('portdragstart', {
+            nodeId: node.id,
+            portType,
+            portElement: event.target
+        });
+    }
+
+
+  function handlePropertyDragOver(event) {
+    // Only handle property drag events
+    if (!event.dataTransfer.types.includes('application/json')) {
+        return;
+    }
+    
+    event.preventDefault();
+    event.stopPropagation(); // Prevent node drag interference
+    
+    if (isValidPropertyType(event)) {
+        event.currentTarget.classList.add('valid-target');
+        event.dataTransfer.dropEffect = 'copy';
+    } else {
+        event.currentTarget.classList.add('invalid-target');
+        event.dataTransfer.dropEffect = 'none';
+    }
+}
+
+function handlePropertyDrop(event) {
+        if (!event.dataTransfer.types.includes('application/json')) {
+            return;
+        }
+        
+        event.preventDefault();
+        event.stopPropagation();
+        
+        try {
+            const property = JSON.parse(event.dataTransfer.getData('application/json'));
+            // Handle property assignment
+            dispatch('propertyAssigned', {
+                nodeId: node.id,
+                property
+            });
+        } catch (err) {
+            console.error('Error handling property drop:', err);
+        }
+    }
+
+
+
   function handleNodeMouseMove(event) {
     if (!isDragging) return;
 
@@ -155,83 +230,124 @@ function cleanupDrag() {
 onDestroy(() => {
     cleanupDrag();
 });
+
+function handleRemoveChild(childId) {
+    dispatch('removechild', { 
+      parentId: node.id, 
+      childId: childId 
+    });
+  }
+
+  function handleRemoveNode() {
+    dispatch('removenode', { 
+      nodeId: node.id 
+    });
+  }
+
+
   </script>
   
   <div
   bind:this={nodeEl}
-  class="node"
-  class:is-container={isContainer}
-  style="transform: translate({position.x}px, {position.y}px);"
+  class="node {node.type} {isContainer ? 'is-container' : ''}"
+  class:selected={$selectedElementStore?.id === node.id}
+  style="position: absolute; left: {position.x}px; top: {position.y}px; width: {width}px; min-height: {height}px;"
   on:mousedown={handleNodeMouseDown}
 >
-    <div class="node-content">
-      <h4 class="node-title">{node.label}</h4>
-       <!-- Container drop zone -->
-       {#if isContainer}
-       <div 
-       class="container-zone"
-       class:is-parallel={node.type === 'parallel'}
-       class:is-sequence={node.type === 'sequence'}
-       on:dragover|stopPropagation={handleContainerDragOver}
-       on:dragleave|stopPropagation={() => dropTarget = null}
-       on:drop|stopPropagation={handleContainerDrop}
-     >
-         {#if node.children?.length}
-           {#each node.children as child}
-             <div class="container-child">
-               <span>{child.label}</span>
-               <button 
-                 class="remove-child"
-                 on:click={() => dispatch('removechild', { 
-                   parentId: node.id, 
-                   childId: child.id 
-                 })}
-               >×</button>
-             </div>
-           {/each}
-         {:else}
-           <div class="drop-placeholder">
-             Drop Activities Here
-           </div>
-         {/if}
-       </div>
-     {/if}
-   </div>
-  
 
+    <button 
+    class="remove-node-btn"
+    on:click|stopPropagation={handleRemoveNode}
+    aria-label="Remove node"
+    >
+    <X size={14} />
+    </button>
 
-    
-    <div 
+  <div class="node-content">
+    <h4 class="node-title">{node.label}</h4>
+    <!-- Container drop zone -->
+    {#if isContainer}
+      <div 
+        class="container-zone"
+        class:is-parallel={node.type === 'parallel'}
+        class:is-sequence={node.type === 'sequence'}
+        on:dragover|stopPropagation={handleContainerDragOver}
+        on:dragleave|stopPropagation={() => dropTarget = null}
+        on:drop|stopPropagation={handleContainerDrop}
+      >
+        {#if node.children?.length}
+          {#each node.children as child}
+            <div class="container-child">
+              <button 
+              class="remove-child"
+              on:click|stopPropagation={() => handleRemoveChild(child.id)}
+              aria-label="Remove activity"
+            >
+              <X size={14} />
+            </button>
+              <span>{child.label}</span>
+
+            </div>
+          {/each}
+        {:else}
+          <div class="drop-placeholder">
+            Drop Activities Here
+          </div>
+        {/if}
+      </div>
+    {/if}
+  </div>
+
+  <!-- Property slots -->
+  <div 
+    class="property-slots"
+    on:dragover={handlePropertyDragOver}
+    on:drop={handlePropertyDrop}
+  >
+    <!-- Property slots will be rendered here -->
+    <slot name="properties"></slot>
+  </div>
+
+  <div 
     class="port port-input"
     data-node-id={node.id}
     data-port-type="input"
     on:mousedown={(e) => handlePortMouseDown(e, 'input')}
   >
-      Input
-    </div>
-  
-    <div 
+    Input
+  </div>
+
+  <div 
     class="port port-output"
     data-node-id={node.id}
     data-port-type="output"
     on:mousedown={(e) => handlePortMouseDown(e, 'output')}
   >
-      Output
-    </div>
+    Output
   </div>
+</div>
+
   
   <style>
-    .node {
-      position: absolute;
-      width: 120px;
-      background-color: white;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      padding: 8px;
-      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-      cursor: move;
-      user-select: none;
-    }
+  .node {
+    position: absolute;
+    background-color: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    padding: 8px;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    cursor: move;
+    user-select: none;
+    z-index: 100;
+  }
+  
+  .node.activity {
+    border-color: #4299e1;
+  }
+
+  .node.event {
+    border-color: #48bb78;
+  }
   
     .node-title {
       font-size: 14px;
@@ -290,4 +406,77 @@ onDestroy(() => {
     border-color: #3b82f6;
   }
   
+  .property-slots {
+        padding: 8px;
+        min-height: 40px;
+        z-index: 1;
+    }
+
+    /* Drag state classes */
+    .valid-target {
+        background-color: rgba(72, 187, 120, 0.1);
+        border-color: #48bb78;
+    }
+
+    .invalid-target {
+        background-color: rgba(245, 101, 101, 0.1);
+        border-color: #f56565;
+    }
+
+    .remove-node-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    padding: 2px;
+    color: #94a3b8;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .remove-node-btn:hover {
+    color: #ef4444;
+    background: #fee2e2;
+  }
+
+  .remove-child {
+    padding: 2px;
+    color: #94a3b8;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .remove-child:hover {
+    color: #ef4444;
+    background: #fee2e2;
+  }
+
+  .container-child {
+    padding: 0.5rem;
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0.25rem 0;
+    gap: 0.5rem;
+  }
+
+  .node.selected {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+    box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+  }
+
   </style>

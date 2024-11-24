@@ -2,20 +2,31 @@
   import { onMount } from 'svelte';
   import { workflowStore } from '$lib/stores/workflow';
   import FlowNode from './FlowNode.svelte';
+  import { selectedElementStore } from '$lib/stores/workflow';
 
   let canvasEl;
   let workflow;
   let isDragOver = false;
   let dragState = null;
-  let nodeBeingDragged = null; // Track which node is being dragged
-
+  let nodeBeingDragged = null;
+  let isDragging = false;
 
   $: workflow = $workflowStore;
-  //$: console.log('Workflow updated:', workflow); // Debug workflow updates
+
+  $: {
+    console.log('Canvas: Workflow updated:', workflow);
+    console.log('Canvas: Number of nodes:', workflow?.nodes?.length);
+  }
 
   onMount(() => {
     initializeCanvas();
   });
+
+  function handleCanvasClick(event) {
+    if (event.target.classList.contains('canvas')) {
+      selectedElementStore.set(null);
+    }
+  }
 
   function handleNodeDragStart(event) {
     const { nodeId } = event.detail;
@@ -23,63 +34,87 @@
   }
 
   function initializeCanvas() {
-    // Any canvas initialization logic
+    // Canvas initialization logic if needed
   }
 
-  // Drag and drop handlers for new nodes
   function handleDragOver(event) {
+    if (!event.target.classList.contains('canvas')) return;
+    
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     isDragOver = true;
   }
 
-  function handleDragLeave() {
+  function handleDragLeave(event) {
+    if (!event.target.classList.contains('canvas')) return;
+    
+    event.preventDefault();
     isDragOver = false;
   }
 
-  function handleDrop(event) {
+  async function handleDrop(event) {
     event.preventDefault();
     isDragOver = false;
     
-    // If the drop target is inside a container node, skip canvas handling
-    if (event.target.closest('.container-zone')) {
-      return;
-    }
-    
     try {
-      const dataStr = event.dataTransfer.getData('application/json') || 
-                     event.dataTransfer.getData('text/plain');
-      const data = JSON.parse(dataStr);
+      let data;
+      try {
+        const jsonData = event.dataTransfer.getData('application/json');
+        data = JSON.parse(jsonData);
+      } catch (err) {
+        const textData = event.dataTransfer.getData('text/plain');
+        data = JSON.parse(textData);
+      }
+
+      if (!data) {
+        console.error('No valid data in drop event');
+        return;
+      }
+
       const rect = canvasEl.getBoundingClientRect();
-      const position = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
+      const scrollPos = {
+        x: canvasEl.scrollLeft || 0,
+        y: canvasEl.scrollTop || 0
       };
       
+      const position = {
+        x: Math.round(event.clientX - rect.left + scrollPos.x),
+        y: Math.round(event.clientY - rect.top + scrollPos.y)
+      };
+
       const newNode = {
         id: `node-${Date.now()}`,
-        type: data.type,
+        type: data.isEvent ? 'event' : 'activity',
         position,
         label: data.title,
         data: {
           ...data,
-          title: data.title
+          type: data.type,
+          title: data.title,
+          properties: data.properties || {}
+        },
+        width: 200,
+        height: 80,
+        ports: {
+          input: [{ id: 'input-1', type: 'input' }],
+          output: [{ id: 'output-1', type: 'output' }]
         }
       };
+
+      console.log('Canvas: Creating node:', newNode);
+      await workflowStore.addNode(newNode);
+      workflowStore.update();
       
-      workflowStore.addNode(newNode);
-    } catch (err) {
-      console.error('Error handling drop:', err);
+    } catch (error) {
+      console.error('Error in drop handler:', error);
     }
   }
 
-  // Connection drag handlers
   function handlePortDragStart(event) {
     const { nodeId, portType, portElement } = event.detail;
     const canvasRect = canvasEl.getBoundingClientRect();
     const portRect = portElement.getBoundingClientRect();
     
-    // Calculate initial position
     dragState = {
       startX: portRect.left - canvasRect.left + (portRect.width / 2),
       startY: portRect.top - canvasRect.top + (portRect.height / 2),
@@ -89,7 +124,6 @@
       currentY: portRect.top - canvasRect.top + (portRect.height / 2)
     };
 
-    // Add event listeners
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
   }
@@ -119,7 +153,6 @@
       workflowStore.addEdge(edge);
     }
 
-    // Important: Clean up
     cleanupDrag();
   }
 
@@ -145,17 +178,14 @@
     return sourceType === 'output' && targetType === 'input';
   }
 
-  // Node movement handlers
   function handleNodeMove(event) {
     const { nodeId, position } = event.detail;
-    // Ensure we're passing a new position object
     workflowStore.updateNodePosition(nodeId, { ...position });
   }
 
   function handleNodeDragEnd(event) {
     const { nodeId } = event.detail;
     nodeBeingDragged = null;
-    // Force edge recalculation
     workflowStore.update();
   }
 
@@ -165,89 +195,91 @@
     
     if (!sourceNode || !targetNode) return null;
 
-    // Use the actual node positions from the store
     return {
-        x1: sourceNode.position.x + 120, // Node width for output port
-        y1: sourceNode.position.y + 40,  // Half node height
-        x2: targetNode.position.x,       // Input port is on left
-        y2: targetNode.position.y + 40   // Half node height
+        x1: sourceNode.position.x + 120,
+        y1: sourceNode.position.y + 40,
+        x2: targetNode.position.x,
+        y2: targetNode.position.y + 40
     };
-}
-
+  }
 </script>
 
-<div 
-  class="canvas-wrapper"
-  class:is-drag-over={isDragOver}
-  bind:this={canvasEl}
-  on:dragover={handleDragOver}
-  on:dragleave={handleDragLeave}
-  on:drop={handleDrop}
->
-  <!-- Connection layer (SVG) -->
-  <svg class="connection-layer">
-    <!-- Permanent connections -->
-    {#if workflow?.edges && !nodeBeingDragged}
-      {#each workflow.edges as edge (edge.id)}
-        {@const positions = getEdgePositions(edge)}
-        {#if positions}
-          <line 
-            class="edge"
-            x1={positions.x1}
-            y1={positions.y1}
-            x2={positions.x2}
-            y2={positions.y2}
-            stroke="#666"
-            stroke-width="2"
+<div class="canvas-container" bind:this={canvasEl}>
+  <div 
+    class="canvas" 
+    class:is-drag-over={isDragOver}
+    on:dragover|preventDefault={handleDragOver}
+    on:dragleave|preventDefault={handleDragLeave}
+    on:drop|preventDefault={handleDrop}
+    on:click={handleCanvasClick}
+  >
+    <svg class="connection-layer">
+      {#if workflow?.edges && !nodeBeingDragged}
+        {#each workflow.edges as edge (edge.id)}
+          {@const positions = getEdgePositions(edge)}
+          {#if positions}
+            <line 
+              class="edge"
+              x1={positions.x1}
+              y1={positions.y1}
+              x2={positions.x2}
+              y2={positions.y2}
+              stroke="#666"
+              stroke-width="2"
+            />
+          {/if}
+        {/each}
+      {/if}
+
+      {#if dragState}
+        <line
+          class="drag-line"
+          x1={dragState.startX}
+          y1={dragState.startY}
+          x2={dragState.currentX}
+          y2={dragState.currentY}
+          stroke="#4A90E2"
+          stroke-width="2"
+          stroke-dasharray="4"
+        />
+      {/if}
+    </svg>
+
+    <div class="node-layer">
+      {#if workflow?.nodes?.length > 0}
+        {#each workflow.nodes as node (node.id)}
+          <FlowNode 
+            {node}
+            on:portdragstart={handlePortDragStart}
+            on:nodemove={handleNodeMove}
+            on:dragstart={handleNodeDragStart}
+            on:dragend={handleNodeDragEnd}
           />
-        {/if}
-      {/each}
-    {/if}
-
-    <!-- Active drag connection -->
-    {#if dragState}
-      <line
-        class="drag-line"
-        x1={dragState.startX}
-        y1={dragState.startY}
-        x2={dragState.currentX}
-        y2={dragState.currentY}
-        stroke="#4A90E2"
-        stroke-width="2"
-        stroke-dasharray="4"
-      />
-    {/if}
-  </svg>
-
-  <!-- Node layer -->
-  <div class="node-layer">
-    {#if workflow?.nodes}
-      {#each workflow.nodes as node (node.id)}
-      <FlowNode 
-        {node}
-        on:portdragstart={handlePortDragStart}
-        on:nodemove={handleNodeMove}
-        on:dragstart={handleNodeDragStart}
-        on:dragend={handleNodeDragEnd}
-      />
-      {/each}
-    {/if}
+        {/each}
+      {/if}
+    </div>
   </div>
 </div>
 
 <style>
-  .canvas-wrapper {
+  .canvas-container {
+    width: 100%;
+    height: 100%;
+    overflow: auto;
     position: relative;
-    width: 800px;
-    height: 600px;
-    background: #f0f0f0;
-    border: 1px solid #ccc;
-    overflow: hidden;
   }
 
-  .is-drag-over {
+  .canvas {
+    width: 3000px;
+    height: 2000px;
+    position: relative;
+    background: #f0f0f0;
+    transition: all 0.2s ease;
+  }
+
+  .canvas.is-drag-over {
+    background: #e8f4fd;
     border: 2px dashed #4A90E2;
-    background-color: #F0F8FF;
   }
 
   .connection-layer {
@@ -257,7 +289,7 @@
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: 100;
+    z-index: 1;
   }
 
   .node-layer {
@@ -266,7 +298,12 @@
     left: 0;
     width: 100%;
     height: 100%;
-    z-index: 50;
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .node-layer > :global(*) {
+    pointer-events: auto;
   }
 
   .edge {

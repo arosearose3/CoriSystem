@@ -1,113 +1,103 @@
 <script>
   import ActivityPalette from './ActivityPalette.svelte';
-  import WorkflowCanvas from './WorkflowCanvas.svelte';
-  import PropertiesPanel from './PropertiesPanel.svelte';
-  import WorkflowToolbar from './WorkflowToolbar.svelte';  
-   import PreviewPane from './PreviewPane.svelte';
+  import EventPalette from './EventPalette.svelte';
+  import Canvas from './WorkflowCanvas.svelte';
+  import PreviewPane from './PreviewPane.svelte';
+  import PropertiesPane from './PropertiesPanel.svelte';
+  import Toolbar from './WorkflowToolbar.svelte';
+  import { workflowStore } from '$lib/stores/workflow';
 
-  import { workflowStore, selectedElementStore } from '$lib/stores/workflow';
-  import { onMount } from 'svelte';
-
-  let recentWorkflows = [];
-
-  onMount(async () => {
-    workflowStore.reset();
-    recentWorkflows = await fetchRecentWorkflows();
-  });
-
-  async function fetchRecentWorkflows() {
-    // In real implementation, this would fetch from an API
-    return [
-      { id: 1, name: 'Housing Assistance', lastModified: '2024-01-20' },
-      { id: 2, name: 'PRAPARE Assessment', lastModified: '2024-01-19' },
-    ];
-  }
-
-  function handlePropertyUpdate(event) {
-    const { element, changes } = event.detail;
-    workflowStore.updateElement(element.id, changes);
-  }
+  let workflow = $workflowStore;
 </script>
-<!-- Main container with three columns -->
-<div class="main-container">
-  <!-- Left Side: Preview Pane -->
-  <div class="preview-pane-container">
-    <PreviewPane />
-  </div>
 
-  <!-- Center: Workflow Toolbar, Canvas, and Properties Panel -->
-  <div class="center-container">
-    <!-- Workflow Toolbar -->
-    <div class="toolbar-container">
-      <WorkflowToolbar />
+<main class="editor-main">
+  <div class="left-panel">
+    <div class="event-palette">
+      <EventPalette />
     </div>
-
-    <!-- Workflow Canvas -->
-    <div class="canvas-container">
-      <WorkflowCanvas />
-    </div>
-
-    <!-- Properties Panel -->
-    <div class="properties-panel-container">
-      <PropertiesPanel
-        element={$selectedElementStore}
-        on:update={handlePropertyUpdate}
-      />
+    <div class="activity-palette">
+      <ActivityPalette />
     </div>
   </div>
-
-  <!-- Right Side: Activity Palette -->
-  <div class="activity-palette-container">
-    <ActivityPalette />
+  
+  <div class="center-panel">
+    <Canvas />
   </div>
-</div>
+  
+  <div class="right-panel">
+    <div class="preview-section">
+      <PreviewPane />
+    </div>
+    <div class="properties-section">
+      <PropertiesPane />
+    </div>
+  </div>
+</main>
 
 <style>
-  .main-container {
+  .workflow-editor {
     display: flex;
+    flex-direction: column;
     height: 100vh;
+    width: 100vw;
     overflow: hidden;
   }
 
-  .preview-pane-container {
-    width: 280px; /* Fixed width for preview pane */
-    flex-shrink: 0;
-    border-right: 1px solid #e5e7eb;
-    background-color: #f9fafb; /* Light gray background */
-    overflow-y: auto;
+  .editor-header {
+    flex: 0 0 60px;
+    border-bottom: 1px solid #e5e7eb;
+    background: white;
   }
 
-  .center-container {
+  .editor-main {
+    flex: 1;
+    display: flex;
+    min-height: 0; /* Critical for nested scrolling */
+  }
+
+  .left-panel {
     display: flex;
     flex-direction: column;
-    flex: 1; /* Takes up remaining space between preview and palette */
-    min-width: 0; /* Allows center container to shrink below its content width */
-    border-right: 1px solid #e5e7eb;
+    height: 100%;
   }
 
-  .toolbar-container {
-    padding: 1rem;
+  .center-panel {
+    flex: 1;
+    min-width: 0;  /* Critical for flex layout */
+    background: #f9fafb;
+    overflow: hidden; /* Canvas handles own scrolling */
+  }
+
+  .right-panel {
+    flex: 0 0 320px;
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid #e5e7eb;
+    background: white;
+  }
+
+  .preview-section {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
     border-bottom: 1px solid #e5e7eb;
   }
 
-  .canvas-container {
-    flex: 1;
-    padding: 1rem;
-    overflow: auto;
-    background-color: #ffffff;
-  }
-
-  .properties-panel-container {
-    padding: 1rem;
-    border-top: 1px solid #e5e7eb;
-    background-color: #f9fafb;
-  }
-
-  .activity-palette-container {
-    width: 320px;
-    flex-shrink: 0;
-    padding: 1rem;
+  .properties-section {
+    flex: 0 0 300px;
     overflow-y: auto;
-    background-color: #f9fafb;
   }
+
+  .event-palette {
+    flex: 0 0 auto;
+    border-bottom: 1px solid #e5e7eb;
+    max-height: 40%;
+    overflow-y: auto;
+  }
+
+  .activity-palette {
+    flex: 1;
+    overflow-y: auto;
+  }
+
 </style>

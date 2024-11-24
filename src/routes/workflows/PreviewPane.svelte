@@ -2,7 +2,7 @@
 <script>
   import { workflowStore } from '$lib/stores/workflow';
 
-  let workflow;
+  export let workflow;
   let resources = {
     serviceRequest: null,
     planDefinition: null,
@@ -13,13 +13,9 @@
   };
 
   $: {
-    // Add console logging for debugging
-    console.log('Workflow store updated:', $workflowStore);
-    
-    // Only regenerate if we have a valid workflow with nodes
-    if ($workflowStore && Array.isArray($workflowStore.nodes)) {
+    if ($workflowStore && ($workflowStore.structuralChange || !resources.serviceRequest)) {
+      console.log('Structural workflow update detected, regenerating resources');
       resources = generateFhirResources($workflowStore);
-      console.log('Generated resources:', resources);
     }
   }
 
@@ -27,65 +23,142 @@
     try {
       return JSON.stringify(obj, null, 2);
     } catch (error) {
-      console.error('Error formatting JSON:', error);
+      //console.error('Error formatting JSON:', error);
       return '{}';
     }
   }
 
 
-  // CHANGED: Modified generateFhirResources function
   function generateFhirResources(workflow) {
-    if (!workflow || !workflow.nodes) {
-      console.warn('Invalid workflow data:', workflow);
-      return resources; // Return existing resources if workflow is invalid
-    }
+  console.log('Generating FHIR resources for workflow:', workflow);
+    
+  if (!workflow || !workflow.nodes) {
+    console.warn('Invalid workflow data:', workflow);
+    return resources;
+  }
+
+  try {
+    // Generate all resources
+    const eventDefs = generateEventDefinitions(workflow);
+    const activities = generateActivityDefinitions(workflow);
+    const planDef = generatePlanDefinition(workflow);
+
+    console.log('Generated EventDefinitions:', eventDefs);
+    console.log('Generated ActivityDefinitions:', activities);
+    console.log('Generated PlanDefinition:', planDef);
 
     const newResources = {
-      serviceRequest: {
-        resourceType: "ServiceRequest",
-        id: `sr-${Date.now()}`,
-        status: "active",
-        intent: "order",
-        code: {
-          coding: [{
-            system: "http://example.org/service-types",
-            code: "workflow",
-            display: "Workflow Service"
-          }]
-        }
-      },
-      eventDefinitions: workflow.eventDefinitions || [],
-      planDefinition: generatePlanDefinition(workflow),
-      activities: generateActivityDefinitions(workflow),
+      serviceRequest: generateServiceRequest(workflow),
+      eventDefinitions: eventDefs,
+      planDefinition: planDef,
+      activities: activities,
       tasks: workflow.tasks || [],
       requestGroup: generateRequestGroup(workflow)
     };
 
-    console.log('New resources generated:', newResources);
     return newResources;
-  }
 
-  // CHANGED: Modified generatePlanDefinition function
-  function generatePlanDefinition(workflow) {
-    const eventNodes = workflow.nodes.filter(n => n.type === 'event');
-    const actions = buildActionChain(workflow, eventNodes);
-    
+  } catch (error) {
+    console.error('Error generating FHIR resources:', error);
+    return resources;
+  }
+}
+
+  function generateServiceRequest(workflow) {
     return {
-      resourceType: "PlanDefinition",
-      id: `plan-${Date.now()}`,
+      resourceType: "ServiceRequest",
+      id: `sr-${Date.now()}`,
       status: "active",
-      trigger: eventNodes.map(eventNode => ({
-        type: "named-event",
-        eventName: eventNode.data?.eventType || "fhir-resource-changed",
-        eventDefinition: {
-          reference: `EventDefinition/${eventNode.id}`
-        }
-      })),
-      action: actions
+      intent: "order",
+      subject: {
+        reference: "Patient/example"
+      },
+      code: {
+        coding: [{
+          system: "http://terminology.hl7.org/CodeSystem/service-type",
+          code: "workflow",
+          display: workflow.name || "Workflow Service"
+        }]
+      },
+      authoredOn: new Date().toISOString()
     };
   }
 
-  // CHANGED: Enhanced error handling in buildActionChain
+
+  function generateEventDefinitions(workflow) {
+  return workflow.nodes
+    .filter(n => n.type === 'webhook' || n.type === 'fhir-change' || n.type === 'timer')
+    .map(node => ({
+      resourceType: "EventDefinition",
+      id: node.id,
+      status: "active",
+      name: `${node.type}-event`,
+      trigger: [{
+        type: "named-event",
+        name: node.type,
+        condition: {
+          expression: {
+            description: node.label,
+            language: "text/fhirpath",
+            expression: "true"
+          }
+        }
+      }]
+    }));
+}
+
+ 
+function generatePlanDefinition(workflow) {
+  // Find all event nodes
+  const eventNodes = workflow.nodes.filter(n => 
+    n.type === 'webhook' || n.type === 'fhir-change' || n.type === 'timer'
+  );
+  
+  // For each event node, find connected action nodes
+  const planActions = [];
+  
+  eventNodes.forEach(eventNode => {
+    // Find edges where this event is the source
+    const connectedEdges = workflow.edges.filter(e => e.source === eventNode.id);
+    
+    connectedEdges.forEach(edge => {
+      // Find the target node for this edge
+      const targetNode = workflow.nodes.find(n => n.id === edge.target);
+      if (targetNode) {
+        planActions.push({
+          id: targetNode.id,
+          name: targetNode.type,
+          title: targetNode.label,
+          trigger: [{
+            type: "named-event",
+            eventName: eventNode.type,
+            eventDefinition: {
+              reference: `EventDefinition/${eventNode.id}`
+            }
+          }],
+          definitionCanonical: `ActivityDefinition/${targetNode.id}`,
+          type: {
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/action-type",
+              code: "create",
+              display: "Create"
+            }]
+          }
+        });
+      }
+    });
+  });
+
+  return {
+    resourceType: "PlanDefinition",
+    id: `plan-${Date.now()}`,
+    status: "active",
+    name: "workflow-plan",
+    title: workflow.name || "Workflow Plan Definition",
+    action: planActions
+  };
+}
+
   function buildActionChain(workflow, startNodes) {
     if (!workflow.edges || !Array.isArray(workflow.edges)) {
       console.warn('No edges found in workflow');
@@ -99,11 +172,19 @@
       if (!node || visited.has(node.id)) return;
       visited.add(node.id);
 
-      if (node.type === 'activity') {
+      if (node.type === 'activity' || node.data?.type === 'activity') {
         const action = {
           id: node.id,
-          title: node.label || 'Unnamed Activity',
-          definitionCanonical: `ActivityDefinition/${node.id}`
+          title: node.label || node.data?.title || 'Unnamed Activity',
+          description: node.data?.description,
+          definitionCanonical: `ActivityDefinition/${node.id}`,
+          type: {
+            coding: [{
+              system: "http://terminology.hl7.org/CodeSystem/action-type",
+              code: "create",
+              display: "Create"
+            }]
+          }
         };
 
         const outgoingEdges = workflow.edges.filter(e => e.source === node.id);
@@ -123,6 +204,7 @@
       }
     }
 
+    // Process all start nodes
     startNodes.forEach(eventNode => {
       const outgoingEdges = workflow.edges.filter(e => e.source === eventNode.id);
       outgoingEdges.forEach(edge => {
@@ -133,74 +215,72 @@
 
     return actions;
   }
-
   // UNCHANGED: generateActivityDefinitions function remains the same
   function generateActivityDefinitions(workflow) {
-    return workflow.nodes
-      .filter(n => n.type === 'activity')
-      .map(node => ({
-        resourceType: "ActivityDefinition",
-        id: node.id,
-        status: "active",
-        kind: "Task",
-        code: {
-          coding: [{
-            system: "http://example.org/activities",
-            code: node.id,
-            display: node.label
-          }]
-        }
-      }));
+  return workflow.nodes
+    .filter(n => n.type !== 'webhook' && n.type !== 'fhir-change' && n.type !== 'timer')
+    .map(node => ({
+      resourceType: "ActivityDefinition",
+      id: node.id,
+      status: "active",
+      name: node.type,
+      title: node.label,
+      kind: "Task",
+      code: {
+        coding: [{
+          system: "http://example.org/activities",
+          code: node.type,
+          display: node.label
+        }]
+      }
+    }));
+}
+
+function generateRequestGroup(workflow) {
+  // Only generate RequestGroup if there are parallel task nodes
+  // Nov 2024 this returns only one RequestGroup so modify for more complexity
+  const parallelNodes = workflow.nodes.filter(n => n.type === 'parallel');
+  if (!parallelNodes.length) {
+    return null;
   }
 
-  // CHANGED: Enhanced generateRequestGroup function
-  function generateRequestGroup(workflow) {
-    if (!workflow.nodes || !workflow.edges) {
-      return {
-        resourceType: "RequestGroup",
-        status: "active",
-        intent: "order",
-        action: []
-      };
-    }
-
-    const actions = workflow.nodes
-      .filter(n => n.type === 'activity')
-      .map(node => {
-        const outgoingEdges = workflow.edges.filter(e => e.source === node.id);
-        return {
-          id: node.id,
-          resource: {
-            reference: `Task/task-${node.id}`
-          },
-          relatedAction: outgoingEdges.map(edge => ({
-            actionId: edge.target,
-            relationship: "before"
-          }))
-        };
-      });
-
+  return parallelNodes.map(parallelNode => {
+    const childActivities = parallelNode.children || [];
+    
     return {
       resourceType: "RequestGroup",
-      id: `rg-${Date.now()}`,
+      id: `rg-${parallelNode.id}`,
       status: "active",
       intent: "order",
-      action: actions
+      groupingBehavior: "logical-group",
+      selectionBehavior: "all",
+      action: childActivities.map(activity => ({
+        id: activity.id,
+        title: activity.label,
+        resource: {
+          reference: `ActivityDefinition/${activity.id}`
+        }
+      }))
     };
-  }
-
+  })[0]; // Return first one for now, could be modified to handle multiple
+}
   // CHANGED: Added explicit update function
   function handleUpdateClick() {
-    console.log('Update button clicked');
-    // Force regeneration of resources
-    resources = generateFhirResources($workflowStore);
+   // console.log('Manual update triggered');
+    if (workflow) {
+      resources = generateFhirResources({...workflow}); // Force new object
+      console.log('Manually generated resources:', resources);
+    }
   }
 </script>
 
 <div class="preview-pane">
   <div class="preview-header">
     <h2>FHIR Resources</h2>
-    <button class="update-button" on:click={handleUpdateClick}>
+    <button 
+      class="update-button" 
+      on:click={handleUpdateClick}
+    >
       Update Resources
     </button>
   </div>

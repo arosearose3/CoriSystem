@@ -5,24 +5,30 @@ const defaultState = {
   nodes: [],
   edges: [],
   tasks: [],
-  eventDefinitions: [], // Added to track EventDefinitions
-  properties: {}
+  eventDefinitions: [],
+  properties: {},
+  name: "Default Workflow", // Added default name
+  lastUpdated: Date.now() ,  // Added timestamp
+  debug:false
 };
 
 function createWorkflowStore() {
-  const { subscribe, update: storeUpdate, set } = writable(defaultState);
+  const { subscribe, update: storeUpdate, set } = writable({
+    ...defaultState,
+    structuralChange: false
+  });
   let taskGenerator = new TaskGenerator();
 
   return {
     subscribe,
 
     update: () => {
+      // CHANGED: Added immediate callback
       storeUpdate(workflow => {
-        console.log('Forcing workflow update:', workflow);
-        // Create new object reference to trigger reactivity
+        console.log('Forcing workflow update, current nodes:', workflow.nodes);
         return {
           ...workflow,
-          lastUpdated: Date.now() // Add timestamp to force updates
+          lastUpdated: Date.now()
         };
       });
     },
@@ -45,7 +51,8 @@ function createWorkflowStore() {
         );
         return {
           ...workflow,
-          nodes: newNodes
+          nodes: newNodes,
+          structuralChange: false // Position updates are not structural changes
         };
       });
     },
@@ -53,26 +60,34 @@ function createWorkflowStore() {
     addNode: (node) => {
       console.log('Adding node:', node);
       storeUpdate(workflow => {
+        // Ensure arrays exist
+        const currentNodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
+        const currentTasks = Array.isArray(workflow.tasks) ? workflow.tasks : [];
+        const currentEventDefs = Array.isArray(workflow.eventDefinitions) ? 
+          workflow.eventDefinitions : [];
+    
         let newTasks = [];
         let newEventDef = null;
-
-        if (node.type === 'event') {
+    
+        // Handle events
+        if (node.type === 'event' || node.data?.isEvent) {
           newEventDef = generateEventDefinition(node);
-        }
-        else if (node.type === 'activity') {
+        } else if (node.type === 'activity' || node.data?.isActivity) {
           const task = taskGenerator.generateTaskForActivity(node);
-          newTasks = [task];
+          if (task) newTasks = [task];
         }
-
+    
         const updatedWorkflow = {
           ...workflow,
-          nodes: [...workflow.nodes, node],
-          tasks: [...(workflow.tasks || []), ...newTasks],
+          nodes: [...currentNodes, node],
+          tasks: [...currentTasks, ...newTasks],
           eventDefinitions: newEventDef ? 
-            [...(workflow.eventDefinitions || []), newEventDef] : 
-            (workflow.eventDefinitions || []),
-          lastUpdated: Date.now() // Add timestamp to force updates
+            [...currentEventDefs, newEventDef] : 
+            currentEventDefs,
+          structuralChange: true,
+          lastUpdated: Date.now()
         };
+    
         console.log('Updated workflow:', updatedWorkflow);
         return updatedWorkflow;
       });
@@ -101,34 +116,57 @@ function createWorkflowStore() {
 
     addEdge: (edge) => {
       console.log('Adding edge:', edge);
-      storeUpdate(workflow => ({
-        ...workflow,
-        edges: [...workflow.edges, edge],
-        lastUpdated: Date.now() // Add timestamp to force updates
-      }));
+      storeUpdate(workflow => {
+        const updatedWorkflow = {
+          ...workflow,
+          edges: [...workflow.edges, edge],
+          structuralChange: true, // Adding an edge is a structural change
+          lastUpdated: Date.now()
+        };
+        console.log('Updated workflow after adding edge:', updatedWorkflow);
+        return updatedWorkflow;
+      });
     },
 
     removeEdge: (edgeId) =>
       storeUpdate(workflow => ({
         ...workflow,
-        edges: workflow.edges.filter(edge => edge.id !== edgeId)
+        edges: workflow.edges.filter(edge => edge.id !== edgeId),
+        structuralChange: true // Removing an edge is a structural change
       })),
 
+
+
       removeNode: (nodeId) => {
-        storeUpdate(workflow => ({
-          ...workflow,
-          nodes: workflow.nodes.filter(n => n.id !== nodeId),
-          edges: workflow.edges.filter(e => 
+        storeUpdate(workflow => {
+          // Remove the node
+          const updatedNodes = workflow.nodes.filter(n => n.id !== nodeId);
+          
+          // Remove any edges connected to this node
+          const updatedEdges = workflow.edges.filter(e => 
             e.source !== nodeId && e.target !== nodeId
-          ),
-          tasks: workflow.tasks.filter(t => 
+          );
+          
+          // Remove associated tasks
+          const updatedTasks = workflow.tasks.filter(t => 
             !t.id.includes(nodeId) && 
             !t.partOf?.[0]?.reference?.includes(nodeId)
-          ),
-          eventDefinitions: workflow.eventDefinitions.filter(e => 
+          );
+          
+          // Remove from event definitions if it was an event
+          const updatedEventDefs = workflow.eventDefinitions.filter(e => 
             e.id !== nodeId
-          )
-        }));
+          );
+  
+          return {
+            ...workflow,
+            nodes: updatedNodes,
+            edges: updatedEdges,
+            tasks: updatedTasks,
+            eventDefinitions: updatedEventDefs,
+            structuralChange: true
+          };
+        });
       },
 
     addChild: (parentId, child) => {
@@ -149,6 +187,34 @@ function createWorkflowStore() {
         };
       });
     },
+
+    removeChildFromContainer: (parentId, childId) => {
+      storeUpdate(workflow => {
+        const updatedNodes = workflow.nodes.map(node => {
+          if (node.id === parentId) {
+            return {
+              ...node,
+              children: (node.children || []).filter(child => child.id !== childId)
+            };
+          }
+          return node;
+        });
+
+        // Remove any associated tasks
+        const updatedTasks = workflow.tasks.filter(task => 
+          !task.id.includes(childId) && 
+          !task.partOf?.[0]?.reference?.includes(childId)
+        );
+
+        return {
+          ...workflow,
+          nodes: updatedNodes,
+          tasks: updatedTasks,
+          structuralChange: true
+        };
+      });
+    },
+
 
     removeChild: (parentId, childId) => {
       storeUpdate(workflow => {
@@ -171,30 +237,47 @@ function createWorkflowStore() {
 
     addChildToContainer: (containerId, child) => {
       storeUpdate(workflow => {
+        console.log('Adding child to container:', containerId, child);
+        
         // First add child to container
         const updatedNodes = workflow.nodes.map(node => {
           if (node.id === containerId) {
-            return {
+            const updatedNode = {
               ...node,
               children: [...(node.children || []), child]
             };
+            console.log('Updated container node:', updatedNode);
+            return updatedNode;
           }
           return node;
         });
-
-        // Then generate task for new child
-        const containerTask = workflow.tasks.find(t => t.id === `task-${containerId}`);
-        const childTask = taskGenerator.generateTaskForActivity(child, containerTask?.id);
-
-        return {
+    
+        // Generate task for the child if needed
+        let newTasks = [];
+        if (child.type === 'activity') {
+          const containerTask = workflow.tasks.find(t => t.id === `task-${containerId}`);
+          const childTask = taskGenerator.generateTaskForActivity(child, containerTask?.id);
+          if (childTask) {
+            newTasks = [childTask];
+          }
+        }
+    
+        const updatedWorkflow = {
           ...workflow,
           nodes: updatedNodes,
-          tasks: [...workflow.tasks, ...(childTask ? [childTask] : [])]
+          tasks: [...workflow.tasks, ...newTasks],
+          structuralChange: true
         };
+        
+        console.log('Updated workflow after adding child:', updatedWorkflow);
+        return updatedWorkflow;
       });
     },
 
-    reset: () => set(defaultState)
+    reset: () => set({
+      ...defaultState,
+      structuralChange: true
+    })
   };
 }
 
