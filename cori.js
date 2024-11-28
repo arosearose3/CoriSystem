@@ -15,6 +15,9 @@ import listEndpoints from 'express-list-endpoints';
 import axios from 'axios';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
 import { RouteServices } from './serverutils.js';
+import crypto from 'crypto';
+import { randomBytes } from 'crypto';
+
 
 // Import processors and utilities
 import { ActivityExecutor } from './routes/EventProcessor/activityExecutor.js';
@@ -350,61 +353,194 @@ function configureMiddleware() {
 
 }
 
+function extractOAuthEndpoint(metadata, endpointType) {
+  const rest = metadata.rest;
+  if (!rest || !rest.length) {
+      return null;
+  }
+
+  const securityExtensions = rest[0].security.extension || [];
+  const smartExtension = securityExtensions.find(ext =>
+      ext.url === 'http://fhir-registry.smarthealthit.org/StructureDefinition/oauth-uris'
+  );
+
+  if (!smartExtension) {
+      return null;
+  }
+
+  const endpointExt = smartExtension.extension.find(ext => ext.url === endpointType);
+  return endpointExt ? endpointExt.valueUri : null;
+}
+
 // Configure routes in correct order
 function configureRoutes() {
   // 1. Auth routes first
   routeServices.setupAuthRoutes(app);
   
-  // Epic auth route
+  app.get('/epic/launch', async (req, res) => {
+    const { iss, launch } = req.query;
+
+    logger.info('Epic Launch endpoint hit', { endpoint: req.path, params: req.query });
+
+    if (iss && launch) {
+        try {
+            // Validate iss URL
+            let issUrl;
+            try {
+                issUrl = new URL(iss);
+            } catch (err) {
+                throw new Error('Invalid iss URL');
+            }
+
+            // Store iss in session for later use
+            req.session.iss = iss;
+
+            // Fetch the SMART configuration from the FHIR server's metadata
+            const metadataUrl = `${iss}/metadata`;
+            logger.info('Fetching SMART configuration', { metadataUrl });
+
+            const metadataResponse = await axios.get(metadataUrl, {
+                headers: { 'Accept': 'application/json' }
+            });
+
+            // Extract OAuth endpoints
+            const authEndpoint = extractOAuthEndpoint(metadataResponse.data, 'authorize');
+            const tokenEndpoint = extractOAuthEndpoint(metadataResponse.data, 'token');
+
+            if (!authEndpoint || !tokenEndpoint) {
+                throw new Error('Authorization or token endpoint not found in SMART configuration');
+            }
+
+            // Store token endpoint in session for later use
+            req.session.tokenEndpoint = tokenEndpoint;
+
+            // Generate a unique state parameter
+            const oauthState = crypto.randomBytes(16).toString('hex');
+            req.session.oauthState = oauthState;
+
+            // Construct authorization URL
+            const params = new URLSearchParams({
+                response_type: 'code',
+                client_id: process.env.EPIC_CLIENT_ID,
+                redirect_uri: process.env.EPIC_REDIRECT_URI, // Should be your callback endpoint
+                launch: launch,
+                scope: 'launch/patient openid fhirUser',
+                state: oauthState,
+                aud: iss,
+            });
+
+            const fullAuthUrl = `${authEndpoint}?${params.toString()}`;
+            logger.info('Redirecting to Epic authorization', { fullAuthUrl });
+
+            return res.redirect(fullAuthUrl);
+        } catch (error) {
+            logger.error('Error initiating Epic authorization', { message: error.message });
+            return res.status(500).json({
+                error: 'Failed to initiate Epic authorization',
+                details: error.message
+            });
+        }
+    }
+
+    // Missing required parameters
+    logger.error('Invalid launch request - missing required parameters');
+    return res.status(400).json({
+        error: 'Invalid request',
+        details: 'Missing required parameters'
+    });
+});
 
   app.get('/epic/callback', async (req, res) => {
-      const { iss, launch, code, state } = req.query;
+    const { code, state, error, error_description } = req.query;
     
-      // Case 1: Initial Launch from Epic
-      if (iss && launch) {
-        try {
-          const authUrl = `${iss}/oauth2/authorize?response_type=code&client_id=${process.env.EPIC_CLIENT_ID}&redirect_uri=${process.env.EPIC_REDIRECT_URI}&launch=${launch}&scope=launch/patient openid fhirUser&state=uniqueStateIdentifier`;
-    
-          // Redirect the user to Epic's authorization server
-          return res.redirect(authUrl);
-        } catch (error) {
-          logger.error('Error processing launch request from Epic:', error);
-          return res.status(500).send('Failed to process launch request.');
-        }
+      if (error) {
+        // Log the error and provide feedback
+        console.error('Epic authorization error:', error_description || error);
+        return res.status(400).send(`Authorization failed: ${error_description || error}`);
       }
-    
-      // Case 2: Callback After Authorization
-      if (code) {
+
+    logger.info('Epic Callback endpoint hit', { endpoint: req.path, params: req.query });
+
+    // Error returned from Epic authorization server
+    if (error) {
+        logger.error('Epic authorization error', { error, error_description, state });
+        return res.status(400).json({
+            error: 'Authorization failed',
+            details: error_description || error
+        });
+    }
+
+    if (code && state) {
+        logger.info('Received authorization code callback');
         try {
-          // Exchange the authorization code for an access token
-          const tokenResponse = await axios.post(`${process.env.EPIC_TOKEN_URL}`, {
-            grant_type: 'authorization_code',
-            code,
-            redirect_uri: process.env.EPIC_REDIRECT_URI,
-            client_id: process.env.EPIC_CLIENT_ID,
-            client_secret: process.env.EPIC_CLIENT_SECRET,
-          }, {
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          });
-    
-          const tokenData = tokenResponse.data;
-    
-          logger.info('Epic access token received', tokenData);
-    
-          // Store the access token securely
-          req.session.epicAccessToken = tokenData.access_token;
-    
-          // Redirect to the main app or dashboard
-          return res.redirect(`${process.env.CLIENT_URL}/dashboard`);
+            // Verify state parameter matches the one stored in session
+            if (state !== req.session.oauthState) {
+                logger.error('State parameter mismatch', { expected: req.session.oauthState, received: state });
+                return res.status(400).send('Invalid state parameter');
+            }
+
+            // Retrieve token endpoint from session
+            const tokenUrl = req.session.tokenEndpoint;
+            if (!tokenUrl) {
+                throw new Error('Token endpoint not found in session');
+            }
+
+            // Prepare token request parameters
+            const tokenParams = new URLSearchParams({
+                grant_type: 'authorization_code',
+                code: code,
+                redirect_uri: process.env.EPIC_REDIRECT_URI, // Should match the redirect_uri used in the authorization request
+                client_id: process.env.EPIC_CLIENT_ID
+            });
+
+            // Include client_secret if needed (for confidential clients)
+            if (process.env.EPIC_CLIENT_SECRET) {
+                tokenParams.append('client_secret', process.env.EPIC_CLIENT_SECRET);
+            }
+
+            logger.info('Exchanging authorization code for access token');
+            const tokenResponse = await axios.post(tokenUrl, tokenParams.toString(), {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                }
+            });
+
+            const tokenData = tokenResponse.data;
+            logger.info('Successfully received access token');
+
+            // Store token and patient context securely
+            req.session.epicAccessToken = tokenData.access_token;
+            if (tokenData.patient) {
+                req.session.patientId = tokenData.patient;
+            }
+
+            // Handle id_token if OpenID Connect is used
+            if (tokenData.id_token) {
+                // Verify and decode id_token (JWT)
+                const decodedIdToken = jwt.decode(tokenData.id_token, { complete: true });
+                // TODO: Verify token signature and claims according to OpenID Connect specs
+                req.session.idToken = decodedIdToken;
+            }
+
+            // Clear sensitive data from session
+            delete req.session.oauthState;
+            delete req.session.tokenEndpoint;
+            delete req.session.iss;
+
+            return res.redirect('/'); // Redirect to your application's home page or appropriate route
         } catch (error) {
-          logger.error('Error exchanging authorization code:', error);
-          return res.status(500).send('Failed to exchange authorization code for token.');
+            logger.error('Error exchanging code for token', { message: error.message });
+            return res.status(500).send('Failed to complete Epic authorization.');
         }
-      }
-    
-      // If neither case matches, return an error
-      res.status(400).send('Invalid request: Missing required parameters.');
+    }
+
+    // Missing required parameters
+    logger.error('Invalid callback request - missing required parameters');
+    return res.status(400).json({
+        error: 'Invalid request',
+        details: 'Missing required parameters'
     });
+});
 
   // 2. Event routes
 /*   app.use(`${BASE_PATH}/events`, 
@@ -412,6 +548,8 @@ function configureRoutes() {
     createEventRoutes(eventProcessor, logger)
   ); */
   
+
+
   // 3. API routes
   const apiRoutes = {
     'api211': api211Routes,

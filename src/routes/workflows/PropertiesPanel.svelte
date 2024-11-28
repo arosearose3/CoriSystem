@@ -1,6 +1,7 @@
 <script>
   import { createEventDispatcher } from 'svelte';
   import { workflowStore, selectedElementStore } from '$lib/stores/workflow';
+  import { activityDefinitions, activityInstanceStore } from '$lib/stores/activityDefinitions.js';
   import { fly } from 'svelte/transition';
 
   import { slide } from 'svelte/transition';
@@ -14,10 +15,14 @@
   let customFhirPathName = '';
   let selectedProperties = new Map();
 
+  let currentProperties = new Map();
+  let validationErrors = new Map();
+
 
 
   $: if ($selectedElementStore) {
     selectedProperties = new Map($selectedElementStore.properties || []);
+    console.log('PropPanel Selected properties:', selectedProperties);
   }
 
   $: if ($selectedElementStore) {
@@ -37,12 +42,22 @@
     });
   }
 
-  $: activityProperties = $selectedElementStore ? 
-  getPropertiesForActivity($selectedElementStore.data?.type) : {};
+  /* $: activityProperties = $selectedElementStore ? 
+  getPropertiesForActivity($selectedElementStore.data?.type) : {}; */
 
   $: console.log('Selected element:', $selectedElementStore);
   $: console.log('Activity properties:', activityProperties);
 
+  $: {
+    if ($selectedElementStore?.type === 'activity') {
+      const activityType = $selectedElementStore.data?.type;
+      const activityDef = activityDefinitions[activityType];
+      
+      if (activityDef) {
+        initializeProperties(activityDef.properties);
+      }
+    }
+  }
 
   // Property sections with example properties
   const propertySections = {
@@ -177,28 +192,90 @@
     }
   };
 
-
-
-  function updateProperty(propKey, type, value) {
-    if (!$selectedElementStore) return;
-
-    const prefix = type === 'value' ? 'value-' :
-                  type === 'assignment' ? 'assignment-' : 'path-';
+  function initializeProperties(propertyDefs) {
+    const stored = $activityInstanceStore[$selectedElementStore.id] || {};
     
-    // Update local state
-    if (type === 'value') propertyValues[propKey] = value;
-    if (type === 'assignment') propertyAssignments[propKey] = value;
-    if (type === 'path') propertyPaths[propKey] = value;
-
-    // Update store
-    const newProperties = new Map($selectedElementStore.properties || new Map());
-    newProperties.set(`${prefix}${propKey}`, value);
-
-    workflowStore.updateNodeProperties($selectedElementStore.id, newProperties);
+    currentProperties = new Map(
+      Object.entries(propertyDefs).map(([key, def]) => {
+        return [key, {
+          ...def,
+          value: stored[key]?.value || def.default || '',
+          assignmentType: stored[key]?.assignmentType || 'design',
+          runtimePath: stored[key]?.runtimePath || ''
+        }];
+      })
+    );
   }
 
 
+  function updateProperty(key, updateType, value) {
+    if (!currentProperties.has(key)) return;
 
+    const property = currentProperties.get(key);
+    const newProperty = { ...property };
+
+    switch (updateType) {
+      case 'value':
+        newProperty.value = value;
+        validateProperty(key, value);
+        break;
+      case 'assignment':
+        newProperty.assignmentType = value;
+        if (value !== 'design') {
+          newProperty.value = '';
+        }
+        break;
+      case 'path':
+        newProperty.runtimePath = value;
+        break;
+    }
+
+    currentProperties.set(key, newProperty);
+    savePropertyUpdates();
+  }
+
+  function validateProperty(key, value) {
+    const property = currentProperties.get(key);
+    if (!property) return;
+
+    const errors = [];
+    
+    if (property.required && !value) {
+      errors.push('This field is required');
+    }
+
+    if (property.type === 'number' && isNaN(value)) {
+      errors.push('Must be a valid number');
+    }
+
+    if (errors.length) {
+      validationErrors.set(key, errors);
+    } else {
+      validationErrors.delete(key);
+    }
+  }
+
+  function savePropertyUpdates() {
+    if (!$selectedElementStore) return;
+
+    const propertyValues = {};
+    currentProperties.forEach((prop, key) => {
+      propertyValues[key] = {
+        value: prop.value,
+        assignmentType: prop.assignmentType,
+        runtimePath: prop.runtimePath
+      };
+    });
+
+    activityInstanceStore.update(store => ({
+      ...store,
+      [$selectedElementStore.id]: propertyValues
+    }));
+
+    workflowStore.updateNode($selectedElementStore.id, {
+      properties: currentProperties
+    });
+  }
 
   function handlePropertyToggle(sectionId, property) {
     const key = `${sectionId}-${property.id}`;
@@ -268,111 +345,133 @@
 
 </script>
 <div class="property-panel">
-  {#if $selectedElementStore}
+  {#if $selectedElementStore?.type === 'activity'}
     <div class="p-4 border-b border-gray-200">
-      <h2 class="text-lg font-semibold">{$selectedElementStore.data?.title || 'Properties'}</h2>
-      <p class="text-sm text-gray-600">Configure activity properties</p>
+      <h2 class="text-lg font-semibold">
+        {$selectedElementStore.data?.title || 'Activity Properties'}
+      </h2>
     </div>
 
-    {#if Object.keys(activityProperties).length > 0}
-      {#each Object.entries(activityProperties) as [propKey, propConfig]}
+    {#if currentProperties.size > 0}
+      {#each [...currentProperties] as [key, property]}
         <div class="p-4 border-b border-gray-200" transition:slide>
-          <div class="flex items-center justify-between mb-2">
+          <div class="property-header">
             <label class="text-sm font-medium text-gray-700">
-              {propConfig.label}
-              {#if propConfig.required}
+              {property.label}
+              {#if property.required}
                 <span class="text-red-500">*</span>
               {/if}
             </label>
+            {#if property.description}
+              <div class="text-xs text-gray-500">{property.description}</div>
+            {/if}
           </div>
 
-          <div class="space-y-2">
-            <!-- Property Assignment Type Selection -->
+          <div class="property-content">
             <select 
-              class="w-full p-2 border rounded-md text-sm"
-              value={propertyAssignments[propKey] || 'design'}
-              on:change={(e) => updateProperty(propKey, 'assignment', e.target.value)}
+              class="assignment-type"
+              value={property.assignmentType}
+              on:change={(e) => updateProperty(key, 'assignment', e.target.value)}
             >
               <option value="design">Set Now</option>
               <option value="activation">Set at Activation</option>
               <option value="runtime">Set at Runtime</option>
             </select>
 
-            <!-- Value input if "Set Now" is selected -->
-            {#if propertyAssignments[propKey] === 'design'}
-              {#if propConfig.options}
-                <select 
-                  class="w-full p-2 border rounded-md text-sm"
-                  value={propertyValues[propKey] || ''}
-                  on:change={(e) => updateProperty(propKey, 'value', e.target.value)}
+            {#if property.assignmentType === 'design'}
+              {#if property.type === 'select'}
+                <select
+                  class="property-input"
+                  value={property.value}
+                  on:change={(e) => updateProperty(key, 'value', e.target.value)}
                 >
-                  <option value="">Select {propConfig.label}</option>
-                  {#each propConfig.options as option}
+                  <option value="">Select {property.label}</option>
+                  {#each property.options as option}
                     <option value={option}>{option}</option>
                   {/each}
                 </select>
-              {:else if propConfig.type === 'number'}
-                <input 
-                  type="number"
-                  class="w-full p-2 border rounded-md text-sm"
-                  value={propertyValues[propKey] || ''}
-                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
-                />
-              {:else if propConfig.type === 'date'}
-                <input 
-                  type="date"
-                  class="w-full p-2 border rounded-md text-sm"
-                  value={propertyValues[propKey] || ''}
-                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
-                />
               {:else}
-                <input 
-                  type="text"
-                  class="w-full p-2 border rounded-md text-sm"
-                  placeholder={`Enter ${propConfig.label.toLowerCase()}`}
-                  value={propertyValues[propKey] || ''}
-                  on:input={(e) => updateProperty(propKey, 'value', e.target.value)}
+                <input
+                  type={property.type}
+                  class="property-input"
+                  value={property.value}
+                  on:input={(e) => updateProperty(key, 'value', e.target.value)}
+                  placeholder={`Enter ${property.label.toLowerCase()}`}
                 />
               {/if}
+            {:else if property.assignmentType === 'runtime'}
+              <input
+                type="text"
+                class="property-input"
+                value={property.runtimePath}
+                placeholder="Enter runtime path (e.g. %event.patientId)"
+                on:input={(e) => updateProperty(key, 'path', e.target.value)}
+              />
             {/if}
 
-            <!-- Runtime configuration if "Set at Runtime" is selected -->
-            {#if propertyAssignments[propKey] === 'runtime'}
-              <input 
-                type="text"
-                class="w-full p-2 border rounded-md text-sm"
-                placeholder="Enter runtime path (e.g. %event.patientId)"
-                value={propertyPaths[propKey] || ''}
-                on:input={(e) => updateProperty(propKey, 'path', e.target.value)}
-              />
+            {#if validationErrors.has(key)}
+              <div class="validation-error">
+                {validationErrors.get(key).join(', ')}
+              </div>
             {/if}
           </div>
         </div>
       {/each}
     {:else}
       <div class="p-4 text-gray-500">
-        No configurable properties for this element
+        No configurable properties for this activity
       </div>
     {/if}
   {:else}
     <div class="p-4 text-gray-500">
-      Select a node to view properties
+      Select an activity to view properties
     </div>
   {/if}
 </div>
 
 <style>
+ 
   .property-panel {
     height: 100%;
     overflow-y: auto;
     background-color: #f9fafb;
   }
 
-  /* Scrollbar styling */
-  .property-panel {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(156, 163, 175, 0.5) transparent;
+  .property-header {
+    margin-bottom: 8px;
   }
+
+  .property-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .property-input,
+  .assignment-type {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+
+  .validation-error {
+    color: #ef4444;
+    font-size: 12px;
+    margin-top: 4px;
+  }
+
+  .property-input:focus,
+  .assignment-type:focus {
+    outline: none;
+    border-color: #3b82f6;
+    ring: 2px;
+    ring-color: rgba(59, 130, 246, 0.5);
+  }
+
+
+
 
   .property-panel::-webkit-scrollbar {
     width: 6px;

@@ -4,6 +4,23 @@ import { base } from '$app/paths'; // Import the base path
 export const navItems = [
 
   {
+    labelKey: 'coriCode',
+    icon: '⚙️',
+    path: `${base}/workflows`,
+    subject: 'Coricode',
+    roles: ['admin'], 
+
+  },
+  {
+    labelKey: 'workflows2',
+    icon: '⚙️',
+    path: `${base}/workflows2`,
+    subject: 'workflows2',
+    roles: ['admin'], 
+
+  },
+
+  {
     labelKey: 'coriHelpdesk',
     icon: '☎',
     // path: `https://corisystem.atlassian.net/servicedesk/customer/portal/1`,
@@ -46,6 +63,27 @@ export const navItems = [
     path: `${base}/org/stafflist`,
     subject: 'Organization Staff List',
     roles: ['orgadmin'], // Accessible by orgadmin and admin roles
+  },
+  {
+    labelKey: 'questionnaire',
+    icon: '⚙️',
+    path: `${base}/questionnaire`,
+    subject: 'Questionnaires',
+    roles: ['orgadmin', 'admin', 'provider'], // Accessible by orgadmin and admin roles
+  },
+  {
+    labelKey: 'todo',
+    icon: '⚙️',
+    path: `${base}/todo`,
+    subject: 'To Do',
+    roles: ['orgadmin', 'admin', 'provider'], // Accessible by orgadmin and admin roles
+  },
+  {
+    labelKey: 'autherquestionnaire',
+    icon: '⚙️',
+    path: `${base}/questionnaire/author`,
+    subject: 'Auther Questionnaires',
+    roles: ['admin' ], // Accessible by orgadmin and admin roles
   },
 
   {
@@ -96,13 +134,21 @@ export const navItems = [
 
   },
   {
-    labelKey: 'coriCode',
+    labelKey: 'coriCode Activity',
     icon: '⚙️',
-    path: `${base}/workflows`,
-    subject: 'Coricode',
+    path: `${base}/workflows/activity`,
+    subject: 'Coricode Activity',
     roles: ['admin'], 
 
   },
+  {labelKey: 'coriCode EventAuthor',
+  icon: '⚙️',
+  path: `${base}/workflows/eventauthor`,
+  subject: 'Coricode EventAuthoer',
+  roles: ['admin'], 
+  },
+
+
   {
     labelKey: 'coriPlans',
     icon: '⚙️',

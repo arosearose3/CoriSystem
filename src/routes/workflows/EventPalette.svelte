@@ -10,20 +10,12 @@
         description: 'FHIR resource changes',
         items: [
           { 
-            type: 'fhir-change',
+            type: 'fhirchange',
             title: 'FHIR Resource Change',
             properties: {
               resourceType: { type: 'string', label: 'Resource Type', required: true },
               changeType: { type: 'array', label: 'Change Types', options: ['create', 'update', 'delete'] },
               searchCriteria: { type: 'string', label: 'Search Criteria' }
-            }
-          },
-          {
-            type: 'subscription',
-            title: 'FHIR Subscription',
-            properties: {
-              criteria: { type: 'string', label: 'Subscription Criteria', required: true },
-              channel: { type: 'string', label: 'Channel Type', options: ['rest-hook', 'websocket'] }
             }
           }
         ]
@@ -54,8 +46,8 @@
       }
     ];
   
-    function handleDragStart(event, item) {
-  event.stopPropagation();
+  function handleDragStart(event, item) {
+   event.stopPropagation();
   
   if (item) {
     const data = {

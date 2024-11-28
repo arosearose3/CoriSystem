@@ -17,7 +17,7 @@
     console.log('Canvas: Workflow updated:', workflow);
     console.log('Canvas: Number of nodes:', workflow?.nodes?.length);
     workflow?.nodes?.forEach(node => {
-      console.log('Node:', node.id, node.type, node.position);
+      console.log('Node:', node.id, node.data.type, node.position);
     });
   }
 
@@ -58,7 +58,6 @@ function handleContainerDrop(event, containerId) {
 
     const childNode = {
       id: `child-${Date.now()}`,
-      type: data.type,
       label: data.title,
       data: {
         ...data,
@@ -135,7 +134,6 @@ function handleContainerDrop(event, containerId) {
 
     const newNode = {
       id: `node-${Date.now()}`,
-      type: data.type, // Use the actual type for containers
       position,
       label: data.title,
       data: {
@@ -194,7 +192,18 @@ function handleContainerDrop(event, containerId) {
   }
 
   function handleMouseUp(event) {
-    if (!dragState) return;
+    if (!dragState) {
+    const isCanvasClick = event.target.classList.contains('canvas');
+    const clickedNode = event.target.closest('.flow-node');
+    
+    if (isCanvasClick) {
+      selectedElementStore.set(null);
+    } else if (clickedNode) {
+      const nodeId = clickedNode.dataset.nodeId;
+      selectedElementStore.set(nodeId);
+    }
+    return;
+  }
 
     const targetPort = findPortAtPosition(event.clientX, event.clientY);
     
@@ -256,6 +265,8 @@ function handleContainerDrop(event, containerId) {
         y2: targetNode.position.y + 40
     };
   }
+
+
 </script>
 
 <div class="canvas-container" bind:this={canvasEl}>

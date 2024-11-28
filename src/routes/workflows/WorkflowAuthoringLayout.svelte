@@ -3,7 +3,7 @@
   import EventPalette from './EventPalette.svelte';
   import Canvas from './WorkflowCanvas.svelte';
   import PreviewPane from './PreviewPane.svelte';
-  import PropertiesPane from './PropertiesPanel.svelte';
+  import PropertiesPanel from './PropertiesPanel.svelte';
   import Toolbar from './WorkflowToolbar.svelte';
   import { workflowStore } from '$lib/stores/workflow';
 
@@ -25,12 +25,13 @@
   </div>
   
   <div class="right-panel">
+    <div class="properties-section">
+      <PropertiesPanel />
+    </div>
     <div class="preview-section">
       <PreviewPane />
     </div>
-    <div class="properties-section">
-      <PropertiesPane />
-    </div>
+
   </div>
 </main>
 
@@ -59,6 +60,7 @@
     display: flex;
     flex-direction: column;
     height: 100%;
+    max-width: 200px;
   }
 
   .center-panel {

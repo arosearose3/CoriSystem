@@ -2,7 +2,7 @@ import { writable } from 'svelte/store';
 import { TaskGenerator } from '../taskServices.js';
 
 const defaultState = {
-  nodes: [],
+  nodes: [], // Each node should include: {id, type, position, label, data}
   edges: [],
   tasks: [],
   eventDefinitions: [],
@@ -11,6 +11,26 @@ const defaultState = {
   lastUpdated: Date.now() ,  // Added timestamp
   debug:false
 };
+
+
+function determineNodeType(node) {
+  //returns a string: event, container, or activity
+  if (node.data?.type === 'timer' ||
+      node.data?.type === 'fhirchange'  || 
+      node.data?.type === 'webhook') {
+    return 'event';
+  }
+
+  if (node.data?.type === 'sequence' ||
+    node.data?.type === 'parallel') {
+  return 'container';
+}
+
+  if (node.data?.isContainer) {
+    return 'container';
+  }
+  return 'activity';
+}
 
 function createWorkflowStore() {
   const { subscribe, update: storeUpdate, set } = writable({
@@ -25,7 +45,7 @@ function createWorkflowStore() {
     update: () => {
       // CHANGED: Added immediate callback
       storeUpdate(workflow => {
-        console.log('Forcing workflow update, current nodes:', workflow.nodes);
+     //   console.log('Forcing workflow update, current nodes:', workflow.nodes);
         return {
           ...workflow,
           lastUpdated: Date.now()
@@ -59,7 +79,14 @@ function createWorkflowStore() {
 
     addNode: (node) => {
       console.log('Adding node:', node);
+      const nodeType = determineNodeType(node);
+
       storeUpdate(workflow => {
+
+        const nodeWithProperties = {
+          ...node,
+          properties: new Map()
+        };
         // Ensure arrays exist
         const currentNodes = Array.isArray(workflow.nodes) ? workflow.nodes : [];
         const currentTasks = Array.isArray(workflow.tasks) ? workflow.tasks : [];
@@ -70,9 +97,9 @@ function createWorkflowStore() {
         let newEventDef = null;
     
         // Handle events
-        if (node.type === 'event' || node.data?.isEvent) {
+        if (nodeType === 'event') {
           newEventDef = generateEventDefinition(node);
-        } else if (node.type === 'activity' || node.data?.isActivity) {
+        } else if (nodeType === 'container'){
           const task = taskGenerator.generateTaskForActivity(node);
           if (task) newTasks = [task];
         }
@@ -254,7 +281,7 @@ function createWorkflowStore() {
     
         // Generate task for the child if needed
         let newTasks = [];
-        if (child.type === 'activity') {
+        if (determineNodeType(child) === 'activity') {
           const containerTask = workflow.tasks.find(t => t.id === `task-${containerId}`);
           const childTask = taskGenerator.generateTaskForActivity(child, containerTask?.id);
           if (childTask) {
@@ -273,7 +300,25 @@ function createWorkflowStore() {
         return updatedWorkflow;
       });
     },
+    updateNodeProperties: (nodeId, properties) => {
+      storeUpdate(workflow => {
+        const updatedNodes = workflow.nodes.map(node => {
+          if (node.id === nodeId) {
+            return {
+              ...node,
+              properties: properties
+            };
+          }
+          return node;
+        });
 
+        return {
+          ...workflow,
+          nodes: updatedNodes,
+          lastUpdated: Date.now()
+        };
+      });
+    },
     reset: () => set({
       ...defaultState,
       structuralChange: true
