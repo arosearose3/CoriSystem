@@ -1,7 +1,46 @@
 <script>
+    import { currentView } from './workflowstore.js';
+    import Navigation from './Navigation.svelte';
+    import TaskManagement from './TaskManagement.svelte';
+    import EventManagement from './EventManagement.svelte';
 
-    import TaskTemplate from "./TaskTemplate.svelte";
+  
+  let taskComponent;
+  let eventComponent;
+  
+  function handleCloseTaskEditor() {
+    taskComponent.handleCloseEditor();
+  }
+  
+  function handleCloseEventEditor() {
+    eventComponent.handleCloseEditor();
+  }
 </script>
 
-<TaskTemplate />
+<Navigation />
 
+<main class="container mx-auto">
+  {#if $currentView === 'tasks'}
+    <TaskManagement 
+      bind:this={taskComponent}
+      on:editTemplate
+      on:newTemplate
+    />
+  {:else if $currentView === 'events'}
+    <EventManagement
+      bind:this={eventComponent}
+      on:editDefinition
+      on:newDefinition
+    />
+  {:else if $currentView === 'workflow-canvas'}
+    <div class="p-4">
+      <h1 class="text-2xl font-bold">Workflow Canvas</h1>
+      <!-- Workflow Canvas component would go here -->
+    </div>
+  {:else if $currentView === 'workflows'}
+    <div class="p-4">
+      <h1 class="text-2xl font-bold">Workflows</h1>
+      <!-- Workflows component would go here -->
+    </div>
+  {/if}
+</main>

@@ -5,6 +5,7 @@ export { default as communicationRoutes } from './communicationRoutes.js';
 export { default as consentRoutes } from './consentRoutes.js';
 export { default as emailRoutes } from './emailRoutes.js';
 export { default as exclusionRoutes } from './exclusionRoutes.js';
+export { default as eventDefinitionRoutes } from './eventDefinitionRoutes.js';
 export { default as fileuploadRoutes } from './fileuploadRoutes.js';
 export { default as goalRoutes } from './goalRoutes.js';
 export { default as organizationRoutes } from './organizationRoutes.js';

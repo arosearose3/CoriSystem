@@ -42,8 +42,8 @@
     });
   }
 
-  /* $: activityProperties = $selectedElementStore ? 
-  getPropertiesForActivity($selectedElementStore.data?.type) : {}; */
+ $: activityProperties = $selectedElementStore ? 
+  getPropertiesForActivity($selectedElementStore.data?.type) : {}; 
 
   $: console.log('Selected element:', $selectedElementStore);
   $: console.log('Activity properties:', activityProperties);

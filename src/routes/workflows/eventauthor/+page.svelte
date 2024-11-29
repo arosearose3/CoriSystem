@@ -1,168 +1,314 @@
 <script>
-import { nanoid } from 'nanoid';
-
-const EVENT_TYPES = [
-  { code: 'webhook', display: 'Custom Webhook' },
-  { code: 'timer', display: 'Timer Event' },
-  { code: 'fhirchange', display: 'FHIR Change Event' }
-];
-
-const FHIR_RESOURCES = [
-  'Patient',
-  'Practitioner',
-  'Organization',
-  'Encounter',
-  'Observation',
-  'Condition',
-  'ServiceRequest',
-  'Task',
-  'Questionnaire',
-  'QuestionnaireResponse'
-];
-
-let eventDef = {
-  resourceType: 'EventDefinition',
-  id: nanoid(),
-  status: 'active',
-  name: '',
-  title: '',
-  description: '',
-  eventType: 'webhook',
-  // For webhook
-  webhookPath: '',
-  payloadItems: [],
-  // For timer
-  pubsubMessage: '',
-  // For FHIR change
-  fhirResourceType: 'Patient'
-};
-
-// Generate webhook path on type selection
-$: if (eventDef.eventType === 'webhook' && !eventDef.webhookPath) {
-  eventDef.webhookPath = `api/webhook/${nanoid(8)}`;
-}
-
-// Add new payload item for webhook
-function addPayloadItem() {
-  eventDef.payloadItems = [
-    ...eventDef.payloadItems,
-    { name: '', value: '', id: nanoid() }
+  import { nanoid } from 'nanoid';
+  
+  // Core type definitions
+  const EVENT_TYPES = [
+   { code: 'webhook', display: 'Custom Webhook', description: 'HTTP webhook endpoint that receives JSON payloads' },
+   { code: 'timer', display: 'Timer Event', description: 'Scheduled events using Cloud Scheduler' },
+   { code: 'fhirchange', display: 'FHIR Change Event', description: 'FHIR resource change notifications' }
   ];
-}
-
-// Remove payload item
-function removePayloadItem(id) {
-  eventDef.payloadItems = eventDef.payloadItems.filter(item => item.id !== id);
-}
-
-// Generate RelatedArtifact outputs based on event type
-$: eventOutputs = generateEventOutputs(eventDef);
-
-function generateEventOutputs(def) {
-  switch(def.eventType) {
-    case 'webhook':
-      return def.payloadItems.map(item => ({
-        type: "derived-from",
-        label: `${item.name}-req`,
-        display: `Webhook payload: ${item.name}`,
-        extension: [{
-          url: "https://combinebh.org/fhir/event-mapping",
-          extension: [{
-            url: "path",
-            valueString: `body.${item.name}`
-          }]
-        }]
-      }));
-
-    case 'timer':
-      return [{
-        type: "derived-from",
-        label: "message-req",
-        display: "Timer message payload",
-        extension: [{
-          url: "https://combinebh.org/fhir/event-mapping",
-          extension: [{
-            url: "path",
-            valueString: "message.data"
-          }]
-        }]
-      }];
-
-    case 'fhirchange':
-      return [
-        {
-          type: "derived-from",
-          label: "action-req",
-          display: "FHIR action type",
-          extension: [{
-            url: "https://combinebh.org/fhir/event-mapping",
-            extension: [{
-              url: "path",
-              valueString: "message.attributes.action"
-            }]
-          }]
-        },
-        {
-          type: "derived-from",
-          label: "resource-req",
-          display: "FHIR resource content",
-          extension: [{
-            url: "https://combinebh.org/fhir/event-mapping",
-            extension: [{
-              url: "path",
-              valueString: "message.data"
-            }]
-          }]
-        },
-        {
-          type: "derived-from",
-          label: "versionId-req",
-          display: "Resource version ID",
-          extension: [{
-            url: "https://combinebh.org/fhir/event-mapping",
-            extension: [{
-              url: "path",
-              valueString: "message.attributes.versionId"
-            }]
-          }]
-        }
-      ];
+  
+  const TIMING_UNITS = [
+   { code: 's', display: 'Seconds' },
+   { code: 'min', display: 'Minutes' },
+   { code: 'h', display: 'Hours' },
+   { code: 'd', display: 'Days' }
+  ];
+  
+  const FHIR_RESOURCES = [
+   'Patient',
+   'Practitioner',
+   'Organization',
+   'Encounter',
+   'Observation',
+   'Condition',
+   'ServiceRequest',
+   'Task',
+   'Questionnaire',
+   'QuestionnaireResponse'
+  ];
+  
+  const CONDITION_TYPES = [
+   { 
+     code: 'fhirpath', 
+     display: 'FHIRPath Expression',
+     contexts: ['fhirchange'],
+     inputType: 'expression',
+     validation: (expr) => expr.includes('.')
+   },
+   { 
+     code: 'user', 
+     display: 'User Context',
+     contexts: ['webhook', 'fhirchange', 'timer'],
+     inputType: 'context',
+     validation: (expr) => expr.startsWith('user.')
+   },
+   {
+     code: 'time',
+     display: 'Time Window',
+     contexts: ['webhook', 'timer'],
+     inputType: 'timewindow',
+     validation: (expr) => true
+   },
+   {
+     code: 'data',
+     display: 'Data Validation',
+     contexts: ['webhook', 'fhirchange'],
+     inputType: 'schema',
+     validation: (expr) => true
+   }
+  ];
+  
+  // Default configurations
+  const defaultConditionConfigs = {
+   fhirpath: {
+     expression: '',
+     description: ''
+   },
+   user: {
+     roles: [],
+     organizations: [],
+     permissions: []
+   },
+   time: {
+     days: [],
+     startTime: '',
+     endTime: '',
+     timezone: 'UTC'
+   },
+   data: {
+     schema: {},
+     required: []
+   }
+  };
+  
+  // Event Definition state
+  let eventDef = {
+   resourceType: 'EventDefinition',
+   id: nanoid(),
+   status: 'active',
+   name: '',
+   title: '',
+   description: '',
+   eventType: 'webhook',
+   condition: {
+     type: '',
+     config: null
+   },
+   webhookConfig: {
+     path: `api/webhook/${nanoid(8)}`,
+     payloadItems: []
+   },
+   timerConfig: {
+     frequency: 1,
+     period: 1,
+     periodUnit: 'd'
+   },
+   fhirConfig: {
+     resourceType: 'Patient',
+     action: 'all'
+   }
+  };
+  
+  // Trigger generation
+  function getTriggerType(eventType) {
+   switch(eventType) {
+     case 'webhook':
+       return 'named-event';
+     case 'timer':
+       return 'periodic';
+     case 'fhirchange':
+       return 'data-changed';
+     default:
+       return 'named-event';
+   }
   }
-}
-</script>
+  
+  function generateCondition(condition) {
+   if (!condition?.type) return null;
+   
+   switch(condition.type) {
+     case 'fhirpath':
+       return {
+         language: 'text/fhirpath',
+         expression: condition.config.expression
+       };
+  
+     case 'user':
+       const userConditions = [];
+       if (condition.config.roles.length) {
+         userConditions.push(`user.role in (${condition.config.roles.map(r => `'${r}'`).join(',')})`);
+       }
+       if (condition.config.organizations.length) {
+         userConditions.push(`user.organization in (${condition.config.organizations.map(o => `'${o}'`).join(',')})`);
+       }
+       if (condition.config.permissions.length) {
+         userConditions.push(condition.config.permissions.map(p => `user.hasPermission('${p}')`).join(' and '));
+       }
+       return {
+         language: 'text/fhirpath',
+         expression: userConditions.join(' and ')
+       };
+  
+     case 'time':
+       const timeConditions = [];
+       if (condition.config.days.length) {
+         timeConditions.push(`%now.dayOfWeek in (${condition.config.days.join(',')})`);
+       }
+       if (condition.config.startTime && condition.config.endTime) {
+         timeConditions.push(`%now.timeOfDay >= '${condition.config.startTime}' and %now.timeOfDay <= '${condition.config.endTime}'`);
+       }
+       return {
+         language: 'text/fhirpath',
+         expression: timeConditions.join(' and ')
+       };
+  
+     case 'data':
+       return {
+         language: 'application/json',
+         expression: JSON.stringify(condition.config.schema)
+       };
+   }
+  }
+  
+  function generateTrigger(def) {
+   const baseTrigger = {
+     id: def.id,
+     type: getTriggerType(def.eventType)
+   };
+  
+   if (def.condition.type) {
+     baseTrigger.condition = generateCondition(def.condition);
+   }
+  
+   switch(def.eventType) {
+     case 'webhook':
+       return [{
+         ...baseTrigger,
+         name: def.webhookConfig.path,
+         code: {
+           coding: [{
+             system: 'https://combinebh.org/fhir/trigger-type',
+             code: 'webhook'
+           }]
+         }
+       }];
+  
+     case 'timer':
+       return [{
+         ...baseTrigger,
+         timingTiming: {
+           repeat: {
+             frequency: def.timerConfig.frequency,
+             period: def.timerConfig.period,
+             periodUnit: def.timerConfig.periodUnit
+           }
+         }
+       }];
+  
+     case 'fhirchange':
+       const trigger = {
+         ...baseTrigger,
+         data: [{
+           type: def.fhirConfig.resourceType,
+           profile: [`http://hl7.org/fhir/StructureDefinition/${def.fhirConfig.resourceType}`]
+         }],
+         subscriptionTopic: 'https://combinebh.org/fhir/subscription-topics/resource-change'
+       };
+  
+       if (def.fhirConfig.action !== 'all') {
+         if (!trigger.condition) {
+           trigger.condition = {
+             language: 'text/fhirpath',
+             expression: ''
+           };
+         }
+         const actionCondition = `action = '${def.fhirConfig.action}'`;
+         trigger.condition.expression = trigger.condition.expression
+           ? `(${trigger.condition.expression}) and ${actionCondition}`
+           : actionCondition;
+       }
+  
+       return [trigger];
+   }
+  }
+  
+  // Event handlers
+  function initializeCondition(type) {
+   if (!type) {
+     eventDef.condition = {
+       type: '',
+       config: null
+     };
+     return;
+   }
+  
+   eventDef.condition = {
+     type,
+     config: {...defaultConditionConfigs[type]}
+   };
+  }
+  
+  function addPayloadItem() {
+   eventDef.webhookConfig.payloadItems = [
+     ...eventDef.webhookConfig.payloadItems,
+     { name: '', type: 'string', required: true, id: nanoid() }
+   ];
+  }
+  
+  function removePayloadItem(id) {
+   eventDef.webhookConfig.payloadItems = eventDef.webhookConfig.payloadItems
+     .filter(item => item.id !== id);
+  }
+  
+  // Generate final EventDefinition
+  $: finalEventDefinition = {
+   resourceType: 'EventDefinition',
+   id: eventDef.id,
+   status: eventDef.status,
+   name: eventDef.name,
+   title: eventDef.title,
+   description: eventDef.description,
+   trigger: generateTrigger(eventDef)
+  };
+  </script>
 
-<div class="event-author p-4 max-w-2xl mx-auto">
-  <h2 class="text-xl font-bold mb-4">Create Event Definition</h2>
-
-  <!-- Basic Info -->
-  <div class="mb-6 space-y-4">
-    <div>
-      <label class="block text-sm font-medium mb-1" for="title">
-        Event Title
-      </label>
-      <input
-        type="text"
-        id="title"
-        bind:value={eventDef.title}
-        class="w-full p-2 border rounded"
-        placeholder="Human readable title"
-      />
+<div class="event-editor p-4 max-w-4xl mx-auto">
+  <h2 class="text-2xl font-bold mb-6">Event Definition</h2>
+ 
+  <!-- Basic Information -->
+  <section class="mb-8 bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-4">Basic Information</h3>
+    
+    <div class="grid grid-cols-2 gap-4 mb-4">
+      <div>
+        <label class="block text-sm font-medium mb-1" for="name">
+          Name *
+        </label>
+        <input 
+          type="text"
+          id="name"
+          bind:value={eventDef.name}
+          class="w-full p-2 border rounded"
+          placeholder="computer-friendly-name"
+        />
+      </div>
+ 
+      <div>
+        <label class="block text-sm font-medium mb-1" for="title">
+          Title *
+        </label>
+        <input 
+          type="text"
+          id="title"
+          bind:value={eventDef.title}
+          class="w-full p-2 border rounded"
+          placeholder="Human-friendly title"
+        />
+      </div>
     </div>
-
-    <div>
-      <label class="block text-sm font-medium mb-1" for="name">
-        Event Name
-      </label>
-      <input
-        type="text"
-        id="name"
-        bind:value={eventDef.name}
-        class="w-full p-2 border rounded"
-        placeholder="computer-friendly-name"
-      />
-    </div>
-
-    <div>
+ 
+    <div class="mb-4">
       <label class="block text-sm font-medium mb-1" for="description">
         Description
       </label>
@@ -171,128 +317,413 @@ function generateEventOutputs(def) {
         bind:value={eventDef.description}
         class="w-full p-2 border rounded"
         rows="3"
+        placeholder="Describe the purpose of this event"
       ></textarea>
     </div>
-  </div>
-
-  <!-- Event Type Selection -->
-  <div class="mb-6">
-    <label class="block text-sm font-medium mb-1" for="eventType">
-      Event Type
-    </label>
-    <select
-      id="eventType"
-      bind:value={eventDef.eventType}
-      class="w-full p-2 border rounded"
-    >
-      {#each EVENT_TYPES as type}
-        <option value={type.code}>{type.display}</option>
-      {/each}
-    </select>
-  </div>
-
-  <!-- Type Specific Configuration -->
-  {#if eventDef.eventType === 'webhook'}
-    <div class="mb-6 space-y-4">
-      <div>
+ 
+    <div>
+      <label class="block text-sm font-medium mb-1" for="eventType">
+        Event Type *
+      </label>
+      <select
+        id="eventType"
+        bind:value={eventDef.eventType}
+        class="w-full p-2 border rounded"
+      >
+        {#each EVENT_TYPES as type}
+          <option value={type.code}>{type.display}</option>
+        {/each}
+      </select>
+      <p class="text-sm text-gray-600 mt-1">
+        {EVENT_TYPES.find(t => t.code === eventDef.eventType)?.description}
+      </p>
+    </div>
+  </section>
+ 
+  <!-- Event Configuration -->
+  <section class="mb-8 bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-4">Event Configuration</h3>
+ 
+    {#if eventDef.eventType === 'webhook'}
+      <div class="mb-4">
         <label class="block text-sm font-medium mb-1">
-          Webhook URL
+          Webhook Path
         </label>
-        <div class="bg-gray-100 p-2 rounded">
-          {eventDef.webhookPath}
+        <div class="bg-gray-50 p-2 rounded border font-mono text-sm">
+          {eventDef.webhookConfig.path}
         </div>
       </div>
-
-      <div>
+ 
+      <div class="mb-4">
         <label class="block text-sm font-medium mb-2">
           Payload Items
         </label>
-        {#each eventDef.payloadItems as item}
+        {#each eventDef.webhookConfig.payloadItems as item}
           <div class="flex gap-2 mb-2">
             <input
               type="text"
               bind:value={item.name}
-              placeholder="Name"
+              placeholder="Property name"
               class="flex-1 p-2 border rounded"
             />
-            <input
-              type="text"
-              bind:value={item.value}
-              placeholder="Value"
-              class="flex-1 p-2 border rounded"
-            />
+            <select
+              bind:value={item.type}
+              class="w-32 p-2 border rounded"
+            >
+              <option value="string">String</option>
+              <option value="number">Number</option>
+              <option value="boolean">Boolean</option>
+              <option value="object">Object</option>
+            </select>
+            <label class="flex items-center">
+              <input
+                type="checkbox"
+                bind:checked={item.required}
+                class="mr-2"
+              />
+              Required
+            </label>
             <button
               on:click={() => removePayloadItem(item.id)}
               class="px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600"
-            >
-              ×
-            </button>
+            >×</button>
           </div>
         {/each}
         <button
           on:click={addPayloadItem}
-          class="w-full p-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          class="mt-2 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
         >
           Add Payload Item
         </button>
       </div>
-    </div>
-
-  {:else if eventDef.eventType === 'timer'}
-    <div class="mb-6">
-      <label class="block text-sm font-medium mb-1" for="pubsubMessage">
-        PubSub Message
-      </label>
-      <input
-        type="text"
-        id="pubsubMessage"
-        bind:value={eventDef.pubsubMessage}
-        class="w-full p-2 border rounded"
-        placeholder="Message content"
-      />
-    </div>
-
-  {:else if eventDef.eventType === 'fhirchange'}
-    <div class="mb-6">
-      <label class="block text-sm font-medium mb-1" for="resourceType">
-        FHIR Resource Type
+ 
+    {:else if eventDef.eventType === 'timer'}
+      <div class="grid grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Frequency
+          </label>
+          <input
+            type="number"
+            bind:value={eventDef.timerConfig.frequency}
+            min="1"
+            class="w-full p-2 border rounded"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Period
+          </label>
+          <input
+            type="number"
+            bind:value={eventDef.timerConfig.period}
+            min="1"
+            class="w-full p-2 border rounded"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Unit
+          </label>
+          <select
+            bind:value={eventDef.timerConfig.periodUnit}
+            class="w-full p-2 border rounded"
+          >
+            {#each TIMING_UNITS as unit}
+              <option value={unit.code}>{unit.display}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+ 
+    {:else if eventDef.eventType === 'fhirchange'}
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Resource Type
+          </label>
+          <select
+            bind:value={eventDef.fhirConfig.resourceType}
+            class="w-full p-2 border rounded"
+          >
+            {#each FHIR_RESOURCES as resource}
+              <option value={resource}>{resource}</option>
+            {/each}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Change Action
+          </label>
+          <select
+            bind:value={eventDef.fhirConfig.action}
+            class="w-full p-2 border rounded"
+          >
+            <option value="all">All Changes</option>
+            <option value="create">Create Only</option>
+            <option value="update">Update Only</option>
+            <option value="delete">Delete Only</option>
+          </select>
+        </div>
+      </div>
+    {/if}
+  </section>
+ 
+  <!-- Condition Configuration -->
+  <section class="mb-8 bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-4">Trigger Condition</h3>
+ 
+    <div class="mb-4">
+      <label class="block text-sm font-medium mb-1">
+        Condition Type
       </label>
       <select
-        id="resourceType"
-        bind:value={eventDef.fhirResourceType}
+        bind:value={eventDef.condition.type}
+        on:change={(e) => initializeCondition(e.target.value)}
         class="w-full p-2 border rounded"
       >
-        {#each FHIR_RESOURCES as resource}
-          <option value={resource}>{resource}</option>
+        <option value="">No Condition</option>
+        {#each CONDITION_TYPES as type}
+          {#if type.contexts.includes(eventDef.eventType)}
+            <option value={type.code}>{type.display}</option>
+          {/if}
         {/each}
       </select>
     </div>
-  {/if}
-
-  <!-- Event Outputs Preview -->
-  <div class="mt-8">
-    <h3 class="text-lg font-medium mb-2">Event Outputs</h3>
-    <div class="bg-gray-50 p-4 rounded border">
-      {#each eventOutputs as output}
-        <div class="mb-2 p-2 bg-white rounded shadow">
-          <div class="font-medium">{output.label}</div>
-          <div class="text-sm text-gray-600">{output.display}</div>
-          <div class="text-xs text-gray-500">
-            Path: {output.extension[0].extension[0].valueString}
+ 
+    {#if eventDef.condition.type === 'fhirpath'}
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            FHIRPath Expression
+          </label>
+          <textarea
+            bind:value={eventDef.condition.config.expression}
+            class="w-full p-2 border rounded font-mono"
+            rows="3"
+            placeholder="Enter FHIRPath expression..."
+          ></textarea>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Description
+          </label>
+          <input
+            type="text"
+            bind:value={eventDef.condition.config.description}
+            class="w-full p-2 border rounded"
+            placeholder="Describe what this condition checks..."
+          />
+        </div>
+      </div>
+ 
+    {:else if eventDef.condition.type === 'user'}
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Required Roles
+          </label>
+          <select
+            multiple
+            bind:value={eventDef.condition.config.roles}
+            class="w-full p-2 border rounded"
+          >
+            <option value="admin">Admin</option>
+            <option value="provider">Provider</option>
+            <option value="staff">Staff</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Organizations
+          </label>
+          <select
+            multiple
+            bind:value={eventDef.condition.config.organizations}
+            class="w-full p-2 border rounded"
+          >
+            <option value="org1">Organization 1</option>
+            <option value="org2">Organization 2</option>
+          </select>
+        </div>
+      </div>
+ 
+    {:else if eventDef.condition.type === 'time'}
+      <div class="space-y-4">
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              Start Time
+            </label>
+            <input
+              type="time"
+              bind:value={eventDef.condition.config.startTime}
+              class="w-full p-2 border rounded"
+            />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">
+              End Time
+            </label>
+            <input
+              type="time"
+              bind:value={eventDef.condition.config.endTime}
+              class="w-full p-2 border rounded"
+            />
           </div>
         </div>
-      {/each}
-    </div>
-  </div>
-
-  <!-- Debug: Event Definition Preview -->
-  <div class="mt-8">
-    <h3 class="text-lg font-medium mb-2">Event Definition Preview</h3>
-    <pre class="bg-gray-50 p-4 rounded border overflow-auto">
-      {JSON.stringify({
-        ...eventDef,
-        relatedArtifact: eventOutputs
-      }, null, 2)}
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Days of Week
+          </label>
+          <div class="flex gap-2">
+            {#each ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as day, i}
+              <label class="flex items-center">
+                <input
+                  type="checkbox"
+                  bind:group={eventDef.condition.config.days}
+                  value={i}
+                  class="mr-1"
+                />
+                {day}
+              </label>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {/if}
+  </section>
+ 
+  <!-- Preview -->
+  <section class="bg-white p-6 rounded-lg shadow">
+    <h3 class="text-lg font-semibold mb-4">Preview</h3>
+    <pre class="bg-gray-50 p-4 rounded overflow-auto text-sm">
+      {JSON.stringify(finalEventDefinition, null, 2)}
     </pre>
-  </div>
-</div>
+  </section>
+ </div>
+
+ <style>
+  .event-editor {
+    font-family: system-ui, -apple-system, sans-serif;
+  }
+ 
+  .event-editor input[type="text"],
+  .event-editor input[type="number"],
+  .event-editor input[type="time"],
+  .event-editor select,
+  .event-editor textarea {
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    transition: border-color 0.15s ease-in-out;
+  }
+ 
+  .event-editor input:focus,
+  .event-editor select:focus,
+  .event-editor textarea:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+ 
+  .event-editor select[multiple] {
+    min-height: 8rem;
+  }
+ 
+  .event-editor button {
+    font-weight: 500;
+    transition: all 0.15s ease-in-out;
+  }
+ 
+  .event-editor button:hover {
+    transform: translateY(-1px);
+  }
+ 
+  .event-editor button:active {
+    transform: translateY(0);
+  }
+ 
+  .event-editor pre {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+ 
+  .event-editor .shadow {
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  }
+ 
+  .event-editor .font-mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  }
+ 
+  .event-editor label {
+    user-select: none;
+  }
+ 
+  .event-editor .checkbox-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+ 
+  .event-editor input[type="checkbox"] {
+    width: 1rem;
+    height: 1rem;
+    border-radius: 0.25rem;
+    border: 1px solid #e2e8f0;
+    cursor: pointer;
+  }
+ 
+  .event-editor section {
+    transition: box-shadow 0.15s ease-in-out;
+  }
+ 
+  .event-editor section:hover {
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  }
+ 
+  .event-editor .help-text {
+    color: #64748b;
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+  }
+ 
+  .event-editor .property-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem;
+    background-color: #f8fafc;
+    border-radius: 0.375rem;
+    margin-bottom: 0.5rem;
+  }
+ 
+  .event-editor .remove-btn {
+    width: 1.5rem;
+    height: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 0.25rem;
+    border: none;
+    background-color: #ef4444;
+    color: white;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+  }
+ 
+  .event-editor .remove-btn:hover {
+    background-color: #dc2626;
+  }
+ </style>
+
+ 

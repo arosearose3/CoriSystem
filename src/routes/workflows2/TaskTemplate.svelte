@@ -1,5 +1,6 @@
 <script>
     import { writable } from 'svelte/store';
+    import { base } from '$app/paths'; 
     import Plus from 'lucide-svelte/icons/plus';
     import PropertyField from './InputField.svelte';
     import OutputField from './OutputField.svelte';
@@ -253,6 +254,29 @@
 
         return cleanTask;
     }
+
+    async function handleSave() {
+    if (selectedTemplate) {
+        try {
+            const response = await fetch(`${base}/api/task/add`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(selectedTemplate)
+            });
+            if (!response.ok) {
+                throw new Error('Failed to save template');
+            }
+            showEditor = false;
+            selectedTemplate = null;
+            loadTemplates(); // Reload to get any updates
+        } catch (error) {
+            console.error('Error saving template:', error);
+        }
+    }
+}
+
     
 </script>
 
@@ -338,6 +362,10 @@
       />
     {/each}
   {/if}
+</div>
+
+<div class="mb-4">
+  <button class="btn btn-primary" on:click={handleSave}>Save</button>
 </div>
 
 <!-- Preview Section -->
