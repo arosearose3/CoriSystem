@@ -49,13 +49,24 @@ router.get('/all', async (req, res) => {
     return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });
   }
 
-  try {
-    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}`;
-    const response = await healthcare.projects.locations.datasets.fhirStores.fhir.search({
-      parent,
-      resourceType: 'EventDefinition',
-      auth: auth,
-    });
+   try {
+   // const eventDefinitionData = req.body;
+   // eventDefinitionData.resourceType = 'EventDefinition'; // Ensure resourceType is set
+    const accessToken = await getFhirAccessToken();
+
+    const parent = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
+
+        // Construct the FHIR API URL
+        const url = `${parent}/EventDefinition`;
+
+        // Make the POST request to the FHIR server
+        const response = await axios.get(url,  {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/fhir+json',
+          },
+        });
+    
 
     const eventDefinitions = await handleBlobResponse(response.data);
     res.json(eventDefinitions);

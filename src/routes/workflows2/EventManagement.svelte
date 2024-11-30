@@ -23,7 +23,7 @@
 
   async function loadDefinitions() {
       try {
-          const response = await fetch('/api/event-definitions');
+          const response = await fetch('/api/eventdefinition/all');
           definitions = await response.json();
       } catch (error) {
           console.error('Error loading event definitions:', error);

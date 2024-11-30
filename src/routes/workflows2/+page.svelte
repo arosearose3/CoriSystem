@@ -3,6 +3,8 @@
     import Navigation from './Navigation.svelte';
     import TaskManagement from './TaskManagement.svelte';
     import EventManagement from './EventManagement.svelte';
+    import WorkflowCanvasLayout from './WorkflowCanvasLayout.svelte';
+  import WorkflowCanvas from './WorkflowCanvas.svelte';
 
   
   let taskComponent;
@@ -35,7 +37,7 @@
   {:else if $currentView === 'workflow-canvas'}
     <div class="p-4">
       <h1 class="text-2xl font-bold">Workflow Canvas</h1>
-      <!-- Workflow Canvas component would go here -->
+      <WorkflowCanvasLayout />  
     </div>
   {:else if $currentView === 'workflows'}
     <div class="p-4">

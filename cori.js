@@ -560,7 +560,7 @@ function configureRoutes() {
     'consent': consentRoutes,
     'email': emailRoutes,
     'exclusion': exclusionRoutes,
-    'eventDefinition': eventDefinitionRoutes,
+    'eventdefinition': eventDefinitionRoutes,
     'fileupload': fileuploadRoutes,
     'goal': goalRoutes,
     'organization': organizationRoutes,

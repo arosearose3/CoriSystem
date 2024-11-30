@@ -1,6 +1,11 @@
+
 import express from 'express';
 import { auth, healthcare, PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID, handleBlobResponse } from '../serverutils.js';
 import { BASE_PATH } from '../serverutils.js'; // Adjust the path as necessary
+import { getFhirAccessToken } from '../src/lib/auth/auth.js';
+import axios from 'axios';
+
+
 
 const router = express.Router();
 
@@ -10,19 +15,31 @@ router.post('/add', async (req, res) => {
     return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });
   }
 
-  try {
-    const taskData = req.body;
-    taskData.resourceType = 'Task'; // Ensure resourceType is set
+    try {
+      const taskData = req.body;
+      taskData.resourceType = 'Task'; // Ensure resourceType is set
+      const accessToken = await getFhirAccessToken();
+  
+      const parent = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
+  
+          // Construct the FHIR API URL
+          const url = `${parent}/Task`;
+  
+          // Make the POST request to the FHIR server
+          const response = await axios.post(url, taskData, {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/fhir+json',
+            },
+          });
 
-    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}`;
-    const response = await healthcare.projects.locations.datasets.fhirStores.fhir.create({
-      parent,
-      type: 'Task',
-      requestBody: taskData,
-      auth: auth,
-    });
 
-    res.status(201).json({ message: 'Task added successfully', data: response.data });
+
+ 
+    const processedResponse = handleBlobResponse(response.data);
+    res.status(201).json({ message: `${processedResponse.resourceType} added successfully`, data: processedResponse });
+
+
   } catch (error) {
     console.error('Error adding Task:', error);
     res.status(500).json({ error: `Failed to add Task: ${error.message}` });
@@ -36,12 +53,21 @@ router.get('/all', async (req, res) => {
   }
 
   try {
-    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}`;
-    const response = await healthcare.projects.locations.datasets.fhirStores.fhir.search({
-      parent,
-      resourceType: 'Task',
-      auth: auth,
+    const accessToken = await getFhirAccessToken();
+
+    const parent = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
+  
+    // Construct the FHIR API URL
+    const url = `${parent}/Task`;
+
+    // Make the POST request to the FHIR server
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/fhir+json',
+      },
     });
+
 
     const tasks = await handleBlobResponse(response.data);
     res.json(tasks);

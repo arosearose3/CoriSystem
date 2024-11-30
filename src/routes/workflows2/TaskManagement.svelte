@@ -23,7 +23,7 @@
 
   async function loadTemplates() {
       try {
-          const response = await fetch('/api/task-templates');
+          const response = await fetch('/api/task/all');
           templates = await response.json();
       } catch (error) {
           console.error('Error loading templates:', error);

@@ -256,24 +256,47 @@
     }
 
     async function handleSave() {
-    if (selectedTemplate) {
-        try {
-            const response = await fetch(`${base}/api/task/add`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(selectedTemplate)
-            });
-            if (!response.ok) {
-                throw new Error('Failed to save template');
-            }
-            showEditor = false;
-            selectedTemplate = null;
-            loadTemplates(); // Reload to get any updates
-        } catch (error) {
-            console.error('Error saving template:', error);
+    try {
+        const response = await fetch(`${base}/api/task/add`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(cleanTaskForPreview($template)) // Use the template store value
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to save template: ${response.statusText}`);
         }
+        
+        // Reset or update UI state if needed
+        // Note: Remove references to showEditor and selectedTemplate since they don't exist
+        
+        // Optionally reset the template to initial state
+        template.set({
+            description: "Send Email",
+            id: "send-email-template",
+            intent: "unknown",
+            status: "draft",
+            input: [
+                {
+                    type: {
+                        coding: [{
+                            system: "http://combinebh.org/fhir/task-inputs",
+                            code: "apiPath",
+                            display: "API Path"
+                        }],
+                        text: "API Path"
+                    },
+                    valueString: "api/email"
+                }
+            ]
+        });
+        
+    } catch (error) {
+        console.error('Error saving template:', error);
+        // Optionally show error to user
+        alert('Failed to save template: ' + error.message);
     }
 }
 
