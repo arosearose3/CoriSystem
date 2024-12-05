@@ -2,7 +2,10 @@
 <script>
     import { createEventDispatcher } from 'svelte';
     import { fade } from 'svelte/transition';
+    import { slide } from 'svelte/transition';
     import X  from 'lucide-svelte/icons/x';
+    import Filter from 'lucide-svelte/icons/filter';
+    import ConditionBuilder from './fhirpath/FhirpathConditionBuilder.svelte';
  
     import { workflowStore } from './workflowstore.js';
   
@@ -11,20 +14,56 @@
   
     const dispatch = createEventDispatcher();
     
+    let showConditionPanel = false;
+
+
     let nodeEl;
     let isDragging = false;
+    let isDragOver = false;
     let dragStart = { x: 0, y: 0 };
     let position = {
       x: node?.position?.x || 0,
       y: node?.position?.y || 0
     };
   
-    const isContainer = node.type === 'container';
+    const isContainer = node.type === 'parallel' || node.type === 'sequence'; 
+
     
     $: {
       if (!isDragging && node?.position) {
         position = { ...node.position };
       }
+    }
+
+
+    function toggleConditionPanel() {
+      showConditionPanel = !showConditionPanel;
+    }
+
+    function handleConditionChange(event) {
+  const condition = event.detail.condition;
+  if (!workflowStore) {
+    console.error('workflowStore not available');
+    return;
+  }
+  // Update node data with new condition
+  workflowStore.updateNode(node.id, {
+    ...node,
+    data: {
+      ...node.data,
+      condition: condition
+    }
+  });
+}
+
+    function removeCondition() {
+      workflowStore.updateNode(node.id, {
+        ...node,
+        data: {
+          ...node.data,
+          condition: null
+        }
+      });
     }
   
     function handleMouseDown(event) {
@@ -102,55 +141,52 @@
     }
   
     function handleContainerDragOver(event) {
-      if (!isContainer) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.target.classList.add('drag-over');
+  if (!isContainer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  isDragOver = true;
+}
+  
+function handleContainerDragLeave(event) {
+  if (!isContainer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  isDragOver = false;
+}
+  
+function handleContainerDrop(event) {
+  if (!isContainer) return;
+  event.preventDefault();
+  event.stopPropagation();
+  isDragOver = false;
+
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('application/json'));
+    
+    if (data.type === 'parallel' || data.type === 'sequence') {
+      console.warn('Cannot nest containers');
+      return;
     }
-  
-    function handleContainerDragLeave(event) {
-      if (!isContainer) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.target.classList.remove('drag-over');
-    }
-  
-    function handleContainerDrop(event) {
-      if (!isContainer) return;
-      event.preventDefault();
-      event.stopPropagation();
-      event.target.classList.remove('drag-over');
-  
-      try {
-        const data = JSON.parse(event.dataTransfer.getData('application/json'));
-        
-        // Prevent container-in-container
-        if (data.type === 'container') {
-          console.warn('Cannot nest containers');
-          return;
-        }
-  
-        const childNode = {
-          id: `child-${Date.now()}`,
-          type: data.type,
-          parentId: node.id,
-          data: { ...data }
-        };
-  
-        workflowStore.update(state => {
-          const updatedNode = {
-            ...node,
-            children: [...(node.children || []), childNode]
-          };
-          return {
-            ...state,
-            nodes: state.nodes.map(n => n.id === node.id ? updatedNode : n)
-          };
-        });
-      } catch (error) {
-        console.error('Error handling container drop:', error);
+
+    const childNode = {
+      id: `child-${Date.now()}`,
+      type: 'activity',
+      data: {
+        ...data,
+        containerId: node.id
       }
-    }
+    };
+
+    workflowStore.addContainedNode(node.id, childNode);
+  } catch (error) {
+    console.error('Error handling container drop:', error);
+  }
+}
+
+function handleConditionBuilderClose() {
+    showConditionPanel = false;
+  }
+
   </script>
   
   <div
@@ -180,44 +216,47 @@
       <h3 class="node-title">
         {node.data.title}
       </h3>
+      {#if node.type === 'activity'}
+      <button 
+        class="condition-btn"
+        on:click|stopPropagation={() => toggleConditionPanel()}
+        aria-label="Add condition"
+      >
+        <Filter size={14} />
+      </button>
+    {/if}
   
       <!-- Container Drop Zone -->
       {#if isContainer}
-        <div
-          class="container-zone"
-          class:drag-over={false}
-          on:dragover={handleContainerDragOver}
-          on:dragleave={handleContainerDragLeave}
-          on:drop={handleContainerDrop}
-        >
-          {#if node.children?.length}
-            {#each node.children as child (child.id)}
-              <div class="container-child" transition:fade>
-                <span>{child.data.title}</span>
-                <button
-                  class="remove-child"
-                  on:click|stopPropagation={() => {
-                    workflowStore.update(state => ({
-                      ...state,
-                      nodes: state.nodes.map(n => 
-                        n.id === node.id 
-                          ? { ...n, children: n.children.filter(c => c.id !== child.id) }
-                          : n
-                      )
-                    }));
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            {/each}
-          {:else}
-            <div class="drop-placeholder">
-              Drop items here
+      <div
+        class="container-zone"
+        class:drag-over={isDragOver}
+        data-node-id={node.id}
+        on:dragover={handleContainerDragOver}
+        on:dragleave={handleContainerDragLeave}
+        on:drop={handleContainerDrop}
+      >
+        {#if node.children?.length}
+          {#each node.children as child (child.id)}
+            <div class="container-child" transition:fade>
+              <span>{child.data.title || child.data.description || 'Unnamed Activity'}</span>
+              <button
+                class="remove-child"
+                on:click|stopPropagation={() => {
+                  workflowStore.removeFromContainer(node.id, child.id);
+                }}
+              >
+                <X size={14} />
+              </button>
             </div>
-          {/if}
-        </div>
-      {/if}
+          {/each}
+        {:else}
+          <div class="drop-placeholder">
+            Drop activities here
+          </div>
+        {/if}
+      </div>
+    {/if}
   
       <!-- Properties Section -->
       <div class="properties">
@@ -225,6 +264,20 @@
       </div>
     </div>
   
+    {#if node.data.condition}
+      <div class="condition-display">
+        <div class="condition-text">
+          {node.data.condition}
+        </div>
+        <button
+          class="remove-condition"
+          on:click|stopPropagation={() => removeCondition()}
+        >
+          <X size={12} />
+        </button>
+      </div>
+    {/if}
+
     <!-- Connection Ports -->
     <div
     class="port port-input"
@@ -242,8 +295,76 @@
     on:mousedown={(e) => handlePortMouseDown(e, 'output')}
   />
   </div>  
-  
+
+  {#if showConditionPanel}
+  <ConditionBuilder
+    condition={node.data.condition || ''}
+    on:change={handleConditionChange}
+    onClose={handleConditionBuilderClose}
+  />
+{/if}
+
+
+
   <style>
+
+
+
+.container-zone {
+  margin: 8px -4px;
+  padding: 12px;
+  border: 2px dashed #ccc;
+  border-radius: 4px;
+  min-height: 120px;
+  background: rgba(255, 255, 255, 0.8);
+  transition: all 0.2s ease-in-out;
+}
+
+.container-zone.drag-over {
+  background: rgba(59, 130, 246, 0.1);
+  border-color: #3b82f6;
+  box-shadow: inset 0 0 0 2px #3b82f6;
+  transform: scale(1.01);
+}
+
+.container-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  margin: 6px 0;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s;
+}
+
+.container-child:hover {
+  border-color: #3b82f6;
+  box-shadow: 0 2px 4px rgba(59, 130, 246, 0.1);
+  transform: translateX(2px);
+}
+
+.remove-child {
+    padding: 4px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.remove-child:hover {
+    background: #fee2e2;
+    color: #ef4444;
+}
+
+
+
+
     .node {
       position: absolute;
       background: white;
@@ -389,4 +510,62 @@
     .node.container {
       border-color: #6366f1;
     }
+
+    .node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+  .condition-btn {
+    padding: 4px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .condition-btn:hover {
+    color: #3b82f6;
+    background: #eff6ff;
+  }
+
+  .condition-display {
+    margin: 8px 0;
+    padding: 6px 8px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    font-size: 12px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+  }
+
+  .condition-text {
+    font-family: ui-monospace, monospace;
+    color: #1e293b;
+  }
+
+  .remove-condition {
+    padding: 2px;
+    border: none;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+
+  .remove-condition:hover {
+    color: #ef4444;
+    background: #fee2e2;
+  }
+
+
+
+
   </style>

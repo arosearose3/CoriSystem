@@ -1,7 +1,7 @@
 
 <script>
     import Canvas from './WorkflowCanvas.svelte';
-    import TaskPalette from './TaskPalette.svelte';
+    import ActivityPalette from './ActivityPalette.svelte';
     import EventPalette from './EventPalette.svelte';
   </script>
   
@@ -12,7 +12,7 @@
       </div>
       <div class="divider"></div>
       <div class="palette-section">
-        <TaskPalette />
+        <ActivityPalette />
       </div>
     </div>
     

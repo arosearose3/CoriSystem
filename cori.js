@@ -20,10 +20,15 @@ import { randomBytes } from 'crypto';
 
 
 // Import processors and utilities
+import { PlanLoader } from './routes/EventProcessor/PlanLoader.js';
+import { EventListener } from './routes/EventProcessor/EventListener.js';
+import { PropertyResolver } from './routes/EventProcessor/PropertyResolver.js';
+
 import { ActivityExecutor } from './routes/EventProcessor/activityExecutor.js';
 import { EventProcessor } from './routes/EventProcessor/eventProcessor2.js';
+
 import { createLogger } from './routes/EventProcessor/logger.js';
-import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
+// import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
 import { WebSocketManager } from './serverutils/webSocketServer.js';
 import { getFhirAccessToken } from './src/lib/auth/auth.js';
 import { 
@@ -230,10 +235,10 @@ async function callFhirApi(method, path, data = null) {
 }
 
 // Initialize activity executor
-/* const activityExecutor = new ActivityExecutor({
+const activityExecutor = new ActivityExecutor(new PropertyResolver(), {
   callFhirApi,
   logger
-}); */
+});
 
 // Configure passport
 function configurePassport() {
@@ -263,38 +268,26 @@ async function initializeEventProcessing() {
   try {
     logger.info('Starting event processor initialization');
     
-    eventProcessor = new EventProcessor(callFhirApi, activityExecutor, logger);
+    // Initialize our core components
+    const planLoader = new PlanLoader();
+    const eventListener = new EventListener(app);
+    
+    // Create and initialize event processor with our components
+    eventProcessor = new EventProcessor({
+      planLoader,
+      eventListener,
+      activityExecutor,
+      callFhirApi,
+      logger
+    });
+    
     await eventProcessor.initialize();
     
- /*    const httpsOptions = {
-      key: fs.readFileSync('./certs/localhost-key.pem'),
-      cert: fs.readFileSync('./certs/localhost.pem')
-    }; */
-/* 
-    const httpsOptions = {
-      key: fs.readFileSync('./certs/private.key'),
-      cert: fs.readFileSync('./certs/certificate.crt')
-    }; */
-/* 
-    const httpsOptions = {
-     
-      key: fs.readFileSync(path.resolve(__dirname, './certs/private.key')),
-      cert: fs.readFileSync(path.resolve(__dirname, './certs/certificate.crt')),
-      ca: fs.readFileSync(path.resolve(__dirname, './certs/ca_bundle.crt'))
-    };
-
-    console.log ("dirname:", __dirname);
-    console.log('Key path:', path.resolve(__dirname, './certs/private.key'));
- */
-
-
-    
-  const wsManager = new WebSocketManager(server, logger);
-//  const wsManager = null;
+    // Setup WebSocket manager
+    const wsManager = new WebSocketManager(server, logger);
     app.locals.wsManager = wsManager;
     eventProcessor.setWebSocketManager(wsManager);
     
-  
   } catch (error) {
     logger.error('Failed to initialize event processor:', error);
     throw error;
@@ -543,11 +536,10 @@ function configureRoutes() {
     });
 });
 
-  // 2. Event routes
-/*   app.use(`${BASE_PATH}/events`, 
-    routeServices.logEventRequest.bind(routeServices),
-    createEventRoutes(eventProcessor, logger)
-  ); */
+    app.use(`${BASE_PATH}/events`, 
+      routeServices.logEventRequest.bind(routeServices),
+      createEventRoutes(eventProcessor.eventListener, logger)
+    );
   
 
 
@@ -594,117 +586,174 @@ function configureRoutes() {
 
 // Server startup
 async function startServer(server_arg) {
- 
-/*     logger.info('Initializing activity executor');
+  const PORT = process.env.SERVER_PORT || 3001;
+
+  try {
+    // First, we'll initialize our ECA system components
+    logger.info('Beginning ECA system initialization');
+    
+    // Initialize the activity executor first since other components depend on it
+    logger.info('Initializing activity executor');
     try {
       await activityExecutor.initialize();
       logger.info('Activity executor initialized successfully');
     } catch (error) {
-      logger.error('Activity executor initialization failed:', {
+      logger.error('Activity executor initialization failed', {
         error: error.message,
         stack: error.stack,
         details: error.response?.data
       });
-      throw error;
+      throw new Error('Failed to initialize activity executor: ' + error.message);
     }
-    
-    server = await initializeEventProcessing();
-    
-    if (!eventProcessor?.initialized) {
-      throw new Error('Event processor initialization failed');
-    } */
 
-    // list endpoints to console
-/*     const endpoints = listEndpoints(app)
-      .filter(endpoint => !endpoint.path.startsWith('/api'))
-      .sort((a, b) => a.path.localeCompare(b.path));
-    
-    logger.info(`Found ${endpoints.length} non-API endpoints:`);
-    
-    endpoints.forEach(endpoint => {
-      logger.info('Endpoint:', {
-        path: endpoint.path,
-        methods: endpoint.methods.join(', '),
-   //     middlewares: endpoint.middlewares.join(', ')
+    // Now initialize the event processing system
+    logger.info('Initializing event processing system');
+    try {
+      await initializeEventProcessing();
+      if (!eventProcessor?.initialized) {
+        throw new Error('Event processor initialization check failed');
+      }
+      logger.info('Event processing system initialized successfully');
+    } catch (error) {
+      logger.error('Event processing initialization failed', {
+        error: error.message,
+        stack: error.stack
       });
-    }); */
-    
-    //  Start server
-    const PORT = process.env.SERVER_PORT || 3001;
+      throw new Error('Failed to initialize event processing: ' + error.message);
+    }
 
-    try{
-      console.log ("start - before Promise");
+    // Now proceed with the server startup
+    logger.info('Starting server initialization');
     await new Promise((resolve, reject) => {
-     
-    
-      // Listen for 'error' events on the server
-      console.log ("start - before on error");
+      // Set up error handler for server startup
       server_arg.on('error', (err) => {
         logger.error('Server failed to start:', err);
         reject(err);
       });
-    
-      logger.info('start - before server.listen');
 
+      // Start listening on the specified port
       server_arg.listen(PORT, () => {
         logger.info(`HTTPS Server running on port ${PORT}`);
-        resolve();
-      });
-
-      // Start the server
-/*       server.listen(PORT, () => {
-        logger.info(`HTTPS Server running on port ${PORT}`);
         
-        logger.info('Server Details', {
-          eventProcessorState: {
+        // Log the state of our ECA system
+        logger.info('ECA System Status', {
+          activityExecutor: {
+            initialized: true,
+            activeExecutions: activityExecutor.getActiveExecutions?.()?.length || 0
+          },
+          eventProcessor: {
             initialized: eventProcessor.initialized,
-            webhookCount: eventProcessor.webhookEvents.size,
-            registeredPaths: Array.from(eventProcessor.webhookEvents.keys())
+            webhookCount: eventProcessor.webhookEvents?.size || 0,
+            registeredPaths: Array.from(eventProcessor.webhookEvents?.keys() || [])
           }
         });
         
-        logger.info('start - before resolve');
         resolve();
-      }); */
+      });
     });
-
 
     return server_arg;
 
   } catch (error) {
-    logger.error('Server startup failed:', error);
+    logger.error('Server startup failed', {
+      phase: error.message.includes('activity executor') ? 'Activity Executor Initialization' :
+             error.message.includes('event processing') ? 'Event Processing Initialization' :
+             'Server Startup',
+      error: error.message,
+      stack: error.stack
+    });
     throw error;
   }
 }
 
 async function main() {
   try {
+    logger.info('Starting application initialization');
+
+    // First initialize middleware and basic routes
+    // These need to be set up before any component that might need to use them
     logger.info('Initializing middleware and routes');
     configureMiddleware();
     configurePassport();
     configureRoutes();
 
-/*     logger.info('Initializing event processor');
-    await initializeEventProcessor(); */
-
+    // Create the HTTPS server early since other components need it
     logger.info('Creating HTTPS server');
     const server = createServer();
-    logger.info('Starting server:');
+
+    // Initialize the core ECA system components
+    logger.info('Initializing ECA system components');
+    const propertyResolver = new PropertyResolver();
+    const activityExecutor = new ActivityExecutor(propertyResolver, {
+      callFhirApi,
+      logger
+    });
+    
+    // Initialize WebSocket manager before event processor
+    // This ensures it's available for event processor initialization
+    logger.info('Initializing WebSocket manager');
+    const wsManager = new WebSocketManager(server, logger);
+    app.locals.wsManager = wsManager;
+
+    // Now initialize the event processor with all required dependencies
+    logger.info('Initializing event processor');
+    const planLoader = new PlanLoader();
+    const eventListener = new EventListener(app);
+    
+    eventProcessor = new EventProcessor({
+      planLoader,
+      eventListener,
+      activityExecutor,
+      callFhirApi,
+      logger,
+      wsManager // Provide WebSocket manager during initialization
+    });
+
+    // Initialize the event processor
+    await eventProcessor.initialize();
+    logger.info('Event processor initialized successfully', {
+      status: {
+        plansLoaded: planLoader.getLoadedPlanCount(),
+        endpointsRegistered: eventListener.getRegisteredEndpointCount()
+      }
+    });
+
+    // Start the server after all components are initialized
+    logger.info('Starting server');
     await startServer(server);
 
-    logger.info('Initializing WebSocket manager');
-
-    const wsManager = new WebSocketManager(server, logger);
-    // Attach WebSocket manager to the app.locals or event processor if needed
-    app.locals.wsManager = wsManager;
-    if (eventProcessor) {
-      eventProcessor.setWebSocketManager(wsManager);
-    }
-
-    logger.info('Application started successfully');
+    // Log successful startup with component status
+    logger.info('Application started successfully', {
+      components: {
+        server: 'running',
+        websocket: {
+          status: 'running',
+          clientCount: wsManager.wss.clients.size
+        },
+        eventProcessor: {
+          status: 'running',
+          initialized: eventProcessor.initialized,
+          activeEndpoints: Array.from(eventProcessor.eventListener.getRegisteredEndpoints())
+        },
+        activityExecutor: {
+          status: 'running',
+          activeExecutions: activityExecutor.getActiveExecutions().length
+        }
+      }
+    });
 
   } catch (error) {
-    logger.error('Application failed to start:', error);
+    // Enhanced error logging with component context
+    logger.error('Application failed to start', {
+      error: {
+        message: error.message,
+        stack: error.stack,
+        component: error.message.includes('WebSocket') ? 'WebSocket Manager' :
+                  error.message.includes('event processor') ? 'Event Processor' :
+                  error.message.includes('server') ? 'Server' :
+                  'Unknown Component'
+      }
+    });
     process.exit(1);
   }
 }

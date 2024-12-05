@@ -62,7 +62,7 @@
 
     const data = {
       type: 'event',
-      title: template.title || template.name || 'Untitled Event',
+      title: template.title ,
       eventType: template.type,
       properties: template.properties || {},
       isEvent: true,

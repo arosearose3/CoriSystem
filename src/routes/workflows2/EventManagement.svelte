@@ -25,6 +25,19 @@
       try {
           const response = await fetch('/api/eventdefinition/all');
           definitions = await response.json();
+          console.log ("eventMgmt definitions: ", definitions);
+          if (definitions.resourceType === 'Bundle') {
+              definitions = definitions.entry
+                  .filter(entry => entry.resource.resourceType === 'EventDefinition')
+                  .map(entry => ({
+                      id: entry.resource.id,
+                      name: entry.resource.name,
+                      type: entry.resource.type,
+                      status: entry.resource.status
+                  }));
+          }
+         
+
       } catch (error) {
           console.error('Error loading event definitions:', error);
       }

@@ -12,6 +12,14 @@ export const navItems = [
 
   },
   {
+    labelKey: 'complexflows',
+    icon: '⚙️',
+    path: `${base}/workflows2/complexflows`,
+    subject: 'complexflows',
+    roles: ['admin'], 
+
+  },
+  {
     labelKey: 'workflows2',
     icon: '⚙️',
     path: `${base}/workflows2`,
@@ -19,6 +27,15 @@ export const navItems = [
     roles: ['admin'], 
 
   },
+  {
+    labelKey: 'fhirpath',
+    icon: '⚙️',
+    path: `${base}/workflows2/fhirpath`,
+    subject: 'fhirpath',
+    roles: ['admin'], 
+
+  },
+
 
   {
     labelKey: 'coriHelpdesk',

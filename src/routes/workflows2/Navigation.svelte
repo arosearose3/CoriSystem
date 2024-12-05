@@ -5,7 +5,7 @@
     import   Plus from 'lucide-svelte/icons/plus';
 
     const navItems = [
-      { id: 'tasks', label: 'Tasks' },
+      { id: 'tasks', label: 'Activities' },
       { id: 'events', label: 'Events' },
       { id: 'workflow-canvas', label: 'Workflow Canvas' },
       { id: 'workflows', label: 'Workflows' }

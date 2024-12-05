@@ -1,7 +1,7 @@
 <script>
     import { currentView } from './workflowstore.js';
     import Navigation from './Navigation.svelte';
-    import TaskManagement from './TaskManagement.svelte';
+    import ActivityManagement from './ActivityManagement.svelte';
     import EventManagement from './EventManagement.svelte';
     import WorkflowCanvasLayout from './WorkflowCanvasLayout.svelte';
   import WorkflowCanvas from './WorkflowCanvas.svelte';
@@ -23,7 +23,7 @@
 
 <main class="container mx-auto">
   {#if $currentView === 'tasks'}
-    <TaskManagement 
+    <ActivityManagement 
       bind:this={taskComponent}
       on:editTemplate
       on:newTemplate

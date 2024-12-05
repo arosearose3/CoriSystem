@@ -14,6 +14,94 @@ import { getFhirAccessToken } from '../src/lib/auth/auth.js';
 const router = express.Router();
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
+
+import express from 'express';
+import axios from 'axios';
+import { auth, PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID } from '../serverutils.js';
+import { getFhirAccessToken } from '../src/lib/auth/auth.js';
+
+const router = express.Router();
+const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
+
+
+// Endpoint to fetch PlanDefinition and related Basic plans
+router.get('/allbasicplansplus', async (req, res) => {
+  try {
+    if (!auth) {
+      return res.status(400).json({
+        error: 'Not connected to Google Cloud. Call /connect first.'
+      });
+    }
+
+    const accessToken = await getFhirAccessToken();
+    const url = `${FHIR_BASE_URL}/PlanDefinition`;
+
+    // Query parameters
+    const params = {
+      type: 'workflow-definition',
+      status: 'active',
+      _include: 'PlanDefinition:depends-on'
+    };
+
+    // Fetch data from the FHIR store
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/fhir+json'
+      },
+      params
+    });
+
+    const planDefinitions = response.data;
+
+    // Send response back
+    res.status(200).json({
+      message: 'Fetched PlanDefinition resources with related Basic plans',
+      data: planDefinitions
+    });
+  } catch (error) {
+    console.error('Error fetching PlanDefinitions with includes:', error);
+
+    res.status(500).json({
+      error: 'Failed to fetch PlanDefinitions with related Basic plans',
+      details: error.message
+    });
+  }
+});
+
+export default router;
+
+
+
+// Get all PlanDefinitions with type coding code equal to "workflow-definition"
+router.get('/allbasicplans', async (req, res) => {
+  try {
+    const accessToken = await getFhirAccessToken();
+    const url = `${FHIR_BASE_URL}/PlanDefinition?type=workflow-definition`;
+
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/fhir+json',
+      },
+    });
+
+    const planDefinitionsBundle = await handleBlobResponse(response.data);
+
+    res.json({
+      message: 'Retrieved all PlanDefinitions with type coding code "workflow-definition"',
+      data: planDefinitionsBundle.entry || [],
+    });
+  } catch (error) {
+    console.error('Error fetching PlanDefinitions:', error);
+    res.status(500).json({
+      error: 'Failed to fetch PlanDefinitions',
+      details: error.message,
+    });
+  }
+});
+
+
 // Create new PlanDefinition
 router.post('/create', async (req, res) => {
   try {

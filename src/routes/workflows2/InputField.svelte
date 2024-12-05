@@ -2,180 +2,129 @@
     import { createEventDispatcher } from 'svelte';
     import Trash2 from 'lucide-svelte/icons/trash-2';
 
-    export let inputs; // Keep as 'inputs' since it's receiving property.inputs from parent
-    export let prefix; 
+    export let prefix;
+    export let dynamicValues = [];
     export let inputTypes = [];
     export let validationRules = {};
     export let mappingSources = [];
     export let definitionStages = [];
-    export let availableTasks = [];
-    export let getTaskOutputs = () => [];
-
-    let isTemplateCreation = false;
-    let nameInput = {};
-    let typeInput = {};
-    let definedAtInput = {};
-    let mappingSourceInput = {};
-    let mappingPathInput = {};
-    let validationInput = {};
-    let valueInput = {};
 
     const dispatch = createEventDispatcher();
-    
+
+    // State for each input aspect
+    let nameValue = {
+        path: `/Task/input[${prefix}]/name`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-name` }
+    };
+    let typeValue = {
+        path: `/Task/input[${prefix}]/type`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-type` }
+    };
+    let definedAtValue = {
+        path: `/Task/input[${prefix}]/definedAt`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-definedAt` }
+    };
+    let mappingSourceValue = {
+        path: `/Task/input[${prefix}]/mappingSource`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-mappingSource` }
+    };
+    let mappingPathValue = {
+        path: `/Task/input[${prefix}]/mappingPath`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-mappingPath` }
+    };
+    let validationValue = {
+        path: `/Task/input[${prefix}]/validation`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-validation` }
+    };
+    let valueValue = {
+        path: `/Task/input[${prefix}]/value`,
+        expression: { language: "text/fhirpath", expression: "", name: `${prefix}-value` }
+    };
+
+    let isTemplateCreation = false;
+
+    // Initialize from dynamicValues
     $: {
         try {
-            if (!Array.isArray(inputs)) inputs = [];
-
-            nameInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-name`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-name`,
-                        display: "Name"
-                    }],
-                    text: "Name"
-                },
-                valueString: ''
-            };
-
-            typeInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-type`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-type`,
-                        display: "Type"
-                    }],
-                    text: "Type"
-                },
-                valueString: ''
-            };
-
-            definedAtInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-definedAt`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-definedAt`,
-                        display: "Defined At"
-                    }],
-                    text: "Defined At"
-                },
-                valueString: ''
-            };
-
-            isTemplateCreation = definedAtInput.valueString === 'Template Creation';
-
-            mappingSourceInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-mappingSource`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-mappingSource`,
-                        display: "Mapping Source"
-                    }],
-                    text: "Mapping Source"
-                },
-                valueString: ''
-            };
-
-            mappingPathInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-mappingPath`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-mappingPath`,
-                        display: "Mapping Path"
-                    }],
-                    text: "Mapping Path"
-                },
-                valueString: ''
-            };
-
-            valueInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-value`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-value`,
-                        display: "Value"
-                    }],
-                    text: "Value"
-                },
-                valueString: ''
-            };
-
-            validationInput = inputs.find(input => input?.type?.coding?.[0]?.code === `${prefix}-validation`) || {
-                type: {
-                    coding: [{
-                        system: "http://combinebh.org/fhir/task-inputs",
-                        code: `${prefix}-validation`,
-                        display: "Validation"
-                    }],
-                    text: "Validation"
-                },
-                valueString: ''
-            };
+            dynamicValues.forEach(dv => {
+                const name = dv.expression.name;
+                if (name.startsWith(prefix)) {
+                    const type = name.split('-')[1];
+                    switch(type) {
+                        case 'name':
+                            nameValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'type':
+                            typeValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'definedAt':
+                            definedAtValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'mappingSource':
+                            mappingSourceValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'mappingPath':
+                            mappingPathValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'validation':
+                            validationValue.expression.expression = dv.expression.expression;
+                            break;
+                        case 'value':
+                            valueValue.expression.expression = dv.expression.expression;
+                            break;
+                    }
+                }
+            });
         } catch (error) {
-            console.error('Error while initializing inputs:', error);
+            console.error('Error initializing property values:', error);
         }
     }
 
-    function handleTemplateValueChange(e) {
-        const updatedInput = { 
-            ...valueInput, 
-            valueString: e.target.value 
-        };
-        dispatch('update', updatedInput);
+    $: isTemplateCreation = definedAtValue.expression.expression === 'Template Creation';
+
+    function handleValueChange(field, value) {
+        let updatedValue;
+        switch(field) {
+            case 'name':
+                updatedValue = { ...nameValue, expression: { ...nameValue.expression, expression: value }};
+                break;
+            case 'type':
+                updatedValue = { ...typeValue, expression: { ...typeValue.expression, expression: value }};
+                break;
+            case 'definedAt':
+                updatedValue = { ...definedAtValue, expression: { ...definedAtValue.expression, expression: value }};
+                break;
+            case 'mappingSource':
+                updatedValue = { ...mappingSourceValue, expression: { ...mappingSourceValue.expression, expression: value }};
+                break;
+            case 'mappingPath':
+                updatedValue = { ...mappingPathValue, expression: { ...mappingPathValue.expression, expression: value }};
+                break;
+            case 'validation':
+                const rules = Array.isArray(value) ? value.join(',') : value;
+                updatedValue = { ...validationValue, expression: { ...validationValue.expression, expression: rules }};
+                break;
+            case 'value':
+                updatedValue = { ...valueValue, expression: { ...valueValue.expression, expression: value }};
+                break;
+        }
+        dispatch('update', { prefix, field, dynamicValue: updatedValue });
     }
 
-    function handleNameChange(e) {
-        const updatedInput = { 
-            ...nameInput,
-            type: {
-                coding: [{
-                    system: "http://combinebh.org/fhir/task-inputs",
-                    code: `${prefix}-name`,
-                    display: `${e.target.value} Name`
-                }],
-                text: `${e.target.value} Name`
-            },
-            valueString: e.target.value 
-        };
-        dispatch('update', updatedInput);
-    }
-    
-    function handleTypeChange(e) {
-        const updatedInput = { ...typeInput, valueString: e.target.value };
-        dispatch('update', updatedInput);
-    }
-    
-    function handleDefinedAtChange(e) {
-        const updatedInput = { ...definedAtInput, valueString: e.target.value };
-        dispatch('update', updatedInput);
-    }
-    
-    function handleMappingSourceChange(e) {
-        const updatedInput = { ...mappingSourceInput, valueString: e.target.value };
-        dispatch('update', updatedInput);
-    }
-    
-    function handleMappingPathChange(e) {
-        const updatedInput = { ...mappingPathInput, valueString: e.target.value };
-        dispatch('update', updatedInput);
-    }
-    
     function handleValidationChange(rule, checked) {
-        let updatedValidation = validationInput.valueString ? validationInput.valueString.split(',') : [];
+        const currentRules = validationValue.expression.expression.split(',').filter(Boolean);
+        let newRules;
         if (checked) {
-            updatedValidation.push(rule);
+            newRules = [...currentRules, rule];
         } else {
-            updatedValidation = updatedValidation.filter(v => v !== rule);
+            newRules = currentRules.filter(r => r !== rule);
         }
-        const updatedInput = { ...validationInput, valueString: updatedValidation.join(',') };
-        dispatch('update', updatedInput);
+        handleValueChange('validation', newRules);
     }
-    
+
     function handleRemove() {
         dispatch('remove', { prefix });
     }
-
-
 </script>
 
 <div class="border rounded-lg p-4 space-y-4 relative">
@@ -188,8 +137,9 @@
         <label class="label">Property Name</label>
         <input
             type="text"
-            value={nameInput.valueString}
-            on:input={handleNameChange}
+            class="input w-full"
+            value={nameValue.expression.expression}
+            on:input={(e) => handleValueChange('name', e.target.value)}
             disabled={isTemplateCreation}
         />
     </div>
@@ -198,12 +148,13 @@
     <div>
         <label class="label">Property Type</label>
         <select
-            value={typeInput.valueString}
-            on:change={handleTypeChange}
+            class="select w-full"
+            value={typeValue.expression.expression}
+            on:change={(e) => handleValueChange('type', e.target.value)}
             disabled={isTemplateCreation}
         >
             <option value="" disabled>Select property type</option>
-            {#each inputTypes || [] as type}
+            {#each inputTypes as type}
                 <option value={type.value}>{type.label}</option>
             {/each}
         </select>
@@ -213,44 +164,36 @@
     <div>
         <label class="label">Defined At</label>
         <select
-            value={definedAtInput.valueString}
-            on:change={handleDefinedAtChange}
+            class="select w-full"
+            value={definedAtValue.expression.expression}
+            on:change={(e) => handleValueChange('definedAt', e.target.value)}
         >
             <option value="" disabled>Select definition stage</option>
-            {#each definitionStages || [] as stage}
+            {#each definitionStages as stage}
                 <option value={stage.value}>{stage.label}</option>
             {/each}
         </select>
     </div>
 
     {#if isTemplateCreation}
-    <!-- Template Creation Mode - Show Value Input -->
+        <!-- Template Creation Mode - Show Value Input -->
         <div>
             <label class="label">Property Value</label>
-            {#if typeInput.valueString === "int" || typeInput.valueString === "float"}
+            {#if typeValue.expression.expression === "int" || typeValue.expression.expression === "float"}
                 <input
                     type="number"
                     class="input w-full"
-                    placeholder={`Enter ${typeInput.valueString}`}
-                    value={valueInput.valueString}
-                    on:input={handleTemplateValueChange}
+                    placeholder={`Enter ${typeValue.expression.expression}`}
+                    value={valueValue.expression.expression}
+                    on:input={(e) => handleValueChange('value', e.target.value)}
                 />
-
-            {:else if typeInput.valueString === "string" || typeInput.valueString === "FhirpathString"}
+            {:else}
                 <input
                     type="text"
                     class="input w-full"
                     placeholder="Enter value"
-                    value={valueInput.valueString}
-                    on:input={handleTemplateValueChange}
-                />
-            {:else if typeInput.valueString === "ResourceReference"}
-                <input
-                    type="text"
-                    class="input w-full"
-                    placeholder="Enter Resource Reference"
-                    value={valueInput.valueString}
-                    on:input={handleTemplateValueChange}
+                    value={valueValue.expression.expression}
+                    on:input={(e) => handleValueChange('value', e.target.value)}
                 />
             {/if}
         </div>
@@ -259,73 +202,71 @@
         <div>
             <label class="label">Value Mapping Source</label>
             <select
-                value={mappingSourceInput.valueString}
-                on:change={handleMappingSourceChange}
+                class="select w-full"
+                value={mappingSourceValue.expression.expression}
+                on:change={(e) => handleValueChange('mappingSource', e.target.value)}
             >
                 <option value="" disabled>Select mapping source</option>
-                {#each mappingSources || [] as source}
+                {#each mappingSources as source}
                     <option value={source.value}>{source.label}</option>
                 {/each}
             </select>
         </div>
-    
+
         <div>
             <label class="label">Value Mapping Path</label>
             <input
                 type="text"
-                value={mappingPathInput.valueString}
-                on:input={handleMappingPathChange}
+                class="input w-full"
+                value={mappingPathValue.expression.expression}
+                on:input={(e) => handleValueChange('mappingPath', e.target.value)}
             />
         </div>
     {/if}
- 
 
-        <div>
-            <label class="label">Validation Rules</label>
-            <div>
-                {#each validationRules[typeInput.valueString] || [] as rule}
-                    <div class="flex items-center gap-2">
-                        <input
-                            type="checkbox"
-                            checked={validationInput.valueString.split(',').includes(rule)}
-                            on:change={(e) => handleValidationChange(rule, e.target.checked)}
-                        />
-                        <span>{rule}</span>
-                    </div>
-                {/each}
-            </div>
+    <!-- Validation Rules -->
+    <div>
+        <label class="label">Validation Rules</label>
+        <div class="space-y-2">
+            {#each validationRules[typeValue.expression.expression] || [] as rule}
+                <div class="flex items-center gap-2">
+                    <input
+                        type="checkbox"
+                        checked={validationValue.expression.expression.includes(rule)}
+                        on:change={(e) => handleValidationChange(rule, e.target.checked)}
+                    />
+                    <span>{rule}</span>
+                </div>
+            {/each}
         </div>
-
-   
+    </div>
 </div>
 
-
-  <style>
+<style>
     .btn-danger {
-      background-color: #dc3545;
-      color: white;
-      padding: 0.25rem 0.5rem;
-      border: none;
-      border-radius: 0.25rem;
-      cursor: pointer;
+        background-color: #dc3545;
+        color: white;
+        padding: 0.25rem 0.5rem;
+        border: none;
+        border-radius: 0.25rem;
+        cursor: pointer;
     }
-  
+
     .btn-danger:hover {
-      background-color: #c82333;
+        background-color: #c82333;
     }
-  
-    .mt-4 {
-      margin-top: 1rem;
+
+    .input, .select {
+        border: 1px solid #ddd;
+        padding: 0.5rem;
+        border-radius: 0.25rem;
+        width: 100%;
     }
-  
-    .space-y-2 > * + * {
-      margin-top: 0.5rem;
+
+    .label {
+        font-weight: bold;
+        margin-bottom: 0.5rem;
+        display: block;
     }
-  
-    .space-y-4 > * + * {
-      margin-top: 1rem;
-    }
-  
-    /* Additional styling if needed */
-  </style>
+</style>
   

@@ -1,3 +1,4 @@
+<!-- lib/components/ActivityPalette.svelte -->
 <script>
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
@@ -7,106 +8,136 @@
   let error = null;
   let loading = true;
 
-  // Reactive statement to log template changes
-  $: if (templates) {
-    console.log('TaskPalette templates updated:', templates);
-  }
+  const containerTemplates = [
+    {
+      id: 'parallel-container',
+      type: 'parallel',
+      title: 'Parallel Activities',
+      description: 'Activities execute simultaneously',
+      isContainer: true
+    },
+    {
+      id: 'sequence-container',
+      type: 'sequence',
+      title: 'Sequential Activities',
+      description: 'Activities execute in order',
+      isContainer: true
+    }
+  ];
 
-  function processTaskTemplate(resource) {
+  function processActivityDefinition(resource) {
     return {
       id: resource.id,
       name: resource.name,
       title: resource.title,
       description: resource.description,
-      type: 'task',
+      type: 'activity',
       status: resource.status,
-      code: resource.code,
+      kind: resource.kind, // ActivityDefinition specific
       properties: {
-        // Transform any Task-specific properties here
-        taskCode: resource.code?.coding?.[0]?.code,
-        taskSystem: resource.code?.coding?.[0]?.system,
-        taskDisplay: resource.code?.coding?.[0]?.display,
-        // Add any other properties you need from the Task template
+        code: resource.code,
+        priority: resource.priority,
+        doNotPerform: resource.doNotPerform,
+        timing: resource.timing,
+        location: resource.location,
+        participant: resource.participant
       }
     };
   }
 
   onMount(async () => {
-    console.log('TaskPalette: Fetching templates...');
     try {
-      const response = await fetch('/api/task/all');
-      if (!response.ok) throw new Error('Failed to fetch task templates');
-      const bundle = await response.json();
-      console.log('TaskPalette: Raw bundle:', bundle);
-      
-      if (bundle.resourceType !== 'Bundle') {
-        throw new Error('Invalid response format: Not a FHIR Bundle');
-      }
-
-      // Process the bundle entries
-      templates = bundle.entry
-        .filter(entry => entry.resource.resourceType === 'Task')
-        .map(entry => processTaskTemplate(entry.resource));
-      
-      console.log('TaskPalette: Processed templates:', templates);
+        const response = await fetch('/api/activitydefinition/all');
+        if (!response.ok) throw new Error('Failed to fetch activity templates');
+        const activities = await response.json();
+        console.log('ActivityPalette: Raw activities:', activities);
+        
+        // Process directly as an array instead of expecting a Bundle
+        templates = activities
+            .filter(activity => activity.resourceType === 'ActivityDefinition')
+            .map(processActivityDefinition);
+        
+        console.log('ActivityPalette: Processed templates:', templates);
     } catch (err) {
-      error = 'Failed to load task templates';
-      console.error('TaskPalette error:', err);
+        error = 'Failed to load activity templates';
+        console.error('ActivityPalette error:', err);
     } finally {
-      loading = false;
+        loading = false;
     }
-  });
+});
 
   function handleDragStart(event, template) {
-    console.log('TaskPalette: Starting drag for template:', template);
+    console.log('ActivityPalette: Starting drag for template:', template);
     event.stopPropagation();
 
-    const data = {
-      type: 'task',
-      title: template.title || template.name || 'Untitled Task',
-      taskType: template.type,
+    const data = template.isContainer ? {
+      type: template.type,
+      title: template.title,
+      isContainer: true,
+      width: 300,
+      height: 200,
+      children: []
+    } : {
+      type: 'activity',
+      title: template.title || template.name || 'Untitled Activity',
+      activityType: template.kind,
       properties: template.properties || {},
-      isTask: true,
+      isActivity: true,
       width: 200,
       height: 80,
-      template: template.id,
-      status: template.status,
-      code: template.code
+      template: template.id
     };
 
     try {
       event.dataTransfer.setData('application/json', JSON.stringify(data));
       event.dataTransfer.setData('text/plain', JSON.stringify(data));
       event.dataTransfer.effectAllowed = 'copy';
-      console.log('TaskPalette: Drag data set:', data);
     } catch (err) {
-      console.error('TaskPalette: Error setting drag data:', err);
+      console.error('Error in drag start:', err);
     }
 
     dispatch('dragstart', { template });
   }
 </script>
 
-<div class="palette-container">
-  <h2 class="palette-title">Activities</h2>
+<!-- Template remains largely the same, just updated text -->
+
+  <div class="palette-container">
+    <h4 class="palette-title">Activities</h4>
+  
+    <!-- Container Templates -->
+    <div class="container-templates">
+     
+      {#each containerTemplates as template (template.id)}
+        <div
+          class="palette-item container-item"
+          draggable="true"
+          on:dragstart={(e) => handleDragStart(e, template)}
+        >
+          <span class="item-title">{template.title}</span>
+          <span class="item-description">{template.description}</span>
+        </div>
+      {/each}
+    </div>
+ 
+  
 
   {#if loading}
     <div class="loading">Loading activities...</div>
   {:else if error}
     <div class="error">{error}</div>
   {:else if templates.length === 0}
-    <div class="empty-state">No task templates available</div>
+    <div class="empty-state">No activity templates available</div>
   {:else}
     <div class="templates-list">
       {#each templates as template (template.id)}
-        {@debug template}
         <div
           class="palette-item"
           draggable="true"
           on:dragstart={(e) => handleDragStart(e, template)}
         >
           <span class="item-title">
-            {template.title || template.name || 'Untitled Task'}
+            {template.title || template.name || 'Untitled Activity'}
             {#if template.status !== 'active'}
               <span class="status-badge">{template.status}</span>
             {/if}
@@ -114,9 +145,9 @@
           {#if template.description}
             <span class="item-description">{template.description}</span>
           {/if}
-          {#if template.properties.taskDisplay}
-            <span class="task-info">
-              Type: {template.properties.taskDisplay}
+          {#if template.kind}
+            <span class="activity-type">
+              Type: {template.kind}
             </span>
           {/if}
         </div>
@@ -124,6 +155,8 @@
     </div>
   {/if}
 </div>
+
+
   
   <style>
      .status-badge {
