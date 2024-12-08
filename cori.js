@@ -6,6 +6,7 @@ import { handler } from './build/handler.js';
 import https from 'https';
 import fs from 'fs';
 import path from 'path';
+import jwt from 'jsonwebtoken';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import cors from 'cors';
@@ -28,7 +29,7 @@ import { ActivityExecutor } from './routes/EventProcessor/activityExecutor.js';
 import { EventProcessor } from './routes/EventProcessor/eventProcessor2.js';
 
 import { createLogger } from './routes/EventProcessor/logger.js';
-// import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
+ import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
 import { WebSocketManager } from './serverutils/webSocketServer.js';
 import { getFhirAccessToken } from './src/lib/auth/auth.js';
 import { 
@@ -135,16 +136,20 @@ function createServer() {
       cert: fs.readFileSync('./.certs/localhost.pem'),
     };
 
-    const server = https.createServer(httpsOptions, app);
+    // Create the server instance directly
+    const httpsServer = https.createServer(httpsOptions, app);
 
-    server.on('error', (err) => {
+    // Set up error handler
+    httpsServer.on('error', (err) => {
       logger.error('Server encountered an error:', {
         message: err.message,
         stack: err.stack,
       });
     });
 
-    return server;
+    // Return the actual server instance
+    return httpsServer;
+
   } catch (error) {
     logger.error('Failed to create server:', error);
     throw error;
@@ -283,10 +288,7 @@ async function initializeEventProcessing() {
     
     await eventProcessor.initialize();
     
-    // Setup WebSocket manager
-    const wsManager = new WebSocketManager(server, logger);
-    app.locals.wsManager = wsManager;
-    eventProcessor.setWebSocketManager(wsManager);
+
     
   } catch (error) {
     logger.error('Failed to initialize event processor:', error);
@@ -412,13 +414,16 @@ function configureRoutes() {
             const oauthState = crypto.randomBytes(16).toString('hex');
             req.session.oauthState = oauthState;
 
+            logger.info('EPIC Launch, Redirect URI sent to Epic:', process.env.EPIC_REDIRECT_URI);
+
             // Construct authorization URL
             const params = new URLSearchParams({
                 response_type: 'code',
                 client_id: process.env.EPIC_CLIENT_ID,
-                redirect_uri: process.env.EPIC_REDIRECT_URI, // Should be your callback endpoint
+                redirect_uri: process.env.EPIC_REDIRECT_URI, 
                 launch: launch,
-                scope: 'launch/patient openid fhirUser',
+           //     scope: 'launch/patient openid fhirUser',
+                scope: 'launch openid fhirUser',
                 state: oauthState,
                 aud: iss,
             });
@@ -444,7 +449,8 @@ function configureRoutes() {
     });
 });
 
-  app.get('/epic/callback', async (req, res) => {
+  app.get('/epic/callback6/', async (req, res) => {
+    console.log('EPIC Callback hit with query:', req.query);
     const { code, state, error, error_description } = req.query;
     
       if (error) {
@@ -481,23 +487,24 @@ function configureRoutes() {
 
             // Prepare token request parameters
             const tokenParams = new URLSearchParams({
-                grant_type: 'authorization_code',
-                code: code,
-                redirect_uri: process.env.EPIC_REDIRECT_URI, // Should match the redirect_uri used in the authorization request
-                client_id: process.env.EPIC_CLIENT_ID
-            });
-
-            // Include client_secret if needed (for confidential clients)
-            if (process.env.EPIC_CLIENT_SECRET) {
-                tokenParams.append('client_secret', process.env.EPIC_CLIENT_SECRET);
-            }
-
-            logger.info('Exchanging authorization code for access token');
-            const tokenResponse = await axios.post(tokenUrl, tokenParams.toString(), {
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded'
-                }
-            });
+              grant_type: 'authorization_code',
+              code, // From the callback query
+              redirect_uri: process.env.EPIC_REDIRECT_URI, // Must match the redirect_uri used during authorization
+              client_id: process.env.EPIC_CLIENT_ID, // From your environment variables
+       //       client_secret: process.env.EPIC_CLIENT_SECRET // Required for confidential apps
+          });
+      
+          logger.info('Exchanging authorization code for access token', {
+              tokenUrl,
+              params: tokenParams.toString(),
+          });
+      
+          const tokenResponse = await axios.post(tokenUrl, tokenParams.toString(), {
+              headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded',
+                  'Accept': 'application/json', // Expect JSON response
+              }
+          });
 
             const tokenData = tokenResponse.data;
             logger.info('Successfully received access token');
@@ -510,10 +517,16 @@ function configureRoutes() {
 
             // Handle id_token if OpenID Connect is used
             if (tokenData.id_token) {
-                // Verify and decode id_token (JWT)
-                const decodedIdToken = jwt.decode(tokenData.id_token, { complete: true });
-                // TODO: Verify token signature and claims according to OpenID Connect specs
-                req.session.idToken = decodedIdToken;
+                try {
+                    // Decode and verify the JWT
+                    const decodedIdToken = jwt.decode(tokenData.id_token, { complete: true });
+                    // TODO: Add verification logic (e.g., signature validation) if necessary
+                    req.session.idToken = decodedIdToken;
+                    logger.info('Decoded id_token:', decodedIdToken);
+                } catch (err) {
+                    logger.error('Error decoding id_token:', err.message);
+                    throw new Error('Failed to decode id_token');
+                }
             }
 
             // Clear sensitive data from session
@@ -523,9 +536,15 @@ function configureRoutes() {
 
             return res.redirect('/'); // Redirect to your application's home page or appropriate route
         } catch (error) {
-            logger.error('Error exchanging code for token', { message: error.message });
-            return res.status(500).send('Failed to complete Epic authorization.');
-        }
+          logger.error('Token exchange failed', {
+              message: error.message,
+              response: error.response?.data,
+              status: error.response?.status,
+              headers: error.response?.headers,
+          });
+      
+          throw new Error('Failed to exchange authorization code for token');
+      }
     }
 
     // Missing required parameters
@@ -606,21 +625,7 @@ async function startServer(server_arg) {
       throw new Error('Failed to initialize activity executor: ' + error.message);
     }
 
-    // Now initialize the event processing system
-    logger.info('Initializing event processing system');
-    try {
-      await initializeEventProcessing();
-      if (!eventProcessor?.initialized) {
-        throw new Error('Event processor initialization check failed');
-      }
-      logger.info('Event processing system initialized successfully');
-    } catch (error) {
-      logger.error('Event processing initialization failed', {
-        error: error.message,
-        stack: error.stack
-      });
-      throw new Error('Failed to initialize event processing: ' + error.message);
-    }
+
 
     // Now proceed with the server startup
     logger.info('Starting server initialization');
@@ -635,18 +640,6 @@ async function startServer(server_arg) {
       server_arg.listen(PORT, () => {
         logger.info(`HTTPS Server running on port ${PORT}`);
         
-        // Log the state of our ECA system
-        logger.info('ECA System Status', {
-          activityExecutor: {
-            initialized: true,
-            activeExecutions: activityExecutor.getActiveExecutions?.()?.length || 0
-          },
-          eventProcessor: {
-            initialized: eventProcessor.initialized,
-            webhookCount: eventProcessor.webhookEvents?.size || 0,
-            registeredPaths: Array.from(eventProcessor.webhookEvents?.keys() || [])
-          }
-        });
         
         resolve();
       });
@@ -656,9 +649,7 @@ async function startServer(server_arg) {
 
   } catch (error) {
     logger.error('Server startup failed', {
-      phase: error.message.includes('activity executor') ? 'Activity Executor Initialization' :
-             error.message.includes('event processing') ? 'Event Processing Initialization' :
-             'Server Startup',
+      phase: error.message.includes('activity executor') ? 'Activity Executor Initialization' : 'Server Startup',
       error: error.message,
       stack: error.stack
     });
@@ -672,10 +663,10 @@ async function main() {
 
     // First initialize middleware and basic routes
     // These need to be set up before any component that might need to use them
-    logger.info('Initializing middleware and routes');
+    logger.info('Initializing middleware');
     configureMiddleware();
     configurePassport();
-    configureRoutes();
+  
 
     // Create the HTTPS server early since other components need it
     logger.info('Creating HTTPS server');
@@ -692,7 +683,7 @@ async function main() {
     // Initialize WebSocket manager before event processor
     // This ensures it's available for event processor initialization
     logger.info('Initializing WebSocket manager');
-    const wsManager = new WebSocketManager(server, logger);
+    const wsManager = new WebSocketManager(server, logger);  // Pass server directly
     app.locals.wsManager = wsManager;
 
     // Now initialize the event processor with all required dependencies
@@ -717,6 +708,11 @@ async function main() {
         endpointsRegistered: eventListener.getRegisteredEndpointCount()
       }
     });
+
+ // Now configure routes
+    logger.info('Configuring routes');
+    configureRoutes();
+
 
     // Start the server after all components are initialized
     logger.info('Starting server');

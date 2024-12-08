@@ -32,6 +32,21 @@
 
 
   $: workflow = $workflowStore;
+
+  let edgeData = [];
+
+  $: {
+    edgeData = workflow.edges.map(edge => {
+      const sourceNode = workflow.nodes.find(n => n.id === edge.source);
+      const targetNode = workflow.nodes.find(n => n.id === edge.target);
+      const points = calculateEdgePoints(sourceNode, targetNode);
+      return {
+        edge,
+        points,
+        isResponsePath: edge.isResponsePath
+      };
+    }).filter(data => data.points !== null);
+  }
   
 
   function toggleProperties() {
@@ -122,110 +137,172 @@ function createConditionElement(expression) {
     };
 }
 
+function createActionFromNode(node, FHIR_BASE_URL) {
+    return {
+        id: node.id,
+        title: node.data.title,
+        definitionCanonical: `${FHIR_BASE_URL}/ActivityDefinition/${node.data.template}`,
+        type: {
+            coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/action-type",
+                code: "create"
+            }]
+        }
+    };
+}
+
+function handleResponsePathNode(node, action, workflow, planDefinition) {
+    // Find all edges that come from this node's response ports
+    const responseEdges = workflow.edges.filter(edge => 
+        edge.source === node.id && edge.responseValue
+    );
+
+    // For each response type (approved/rejected), create a condition and related action
+    responseEdges.forEach(edge => {
+        // Find the target node for this response
+        const targetNode = workflow.nodes.find(n => n.id === edge.target);
+        if (!targetNode) return;
+
+        // Create the action for the response handler
+        const responseAction = createActionFromNode(targetNode, FHIR_BASE_URL);
+        
+        // Add condition based on the response value
+        responseAction.condition = [{
+            kind: "applicability",
+            expression: {
+                language: "text/fhirpath",
+                expression: `Task.output.where(name='responseResult').value = '${edge.responseValue}'`
+            }
+        }];
+
+        // Link this action to happen after the Response Path activity
+        responseAction.relatedAction = [{
+            actionId: action.id,
+            relationship: "after-end"
+        }];
+
+        // Add the actions to the plan
+        planDefinition.action.push(action, responseAction);
+    });
+}
+
+function handleRegularNode(node, action, workflow, planDefinition, trigger) {
+    // If this is the first action and we have a trigger, add it
+    if (!planDefinition.action.length && trigger) {
+        action.trigger = [trigger];
+    } 
+    // Otherwise, link to the previous action
+    else if (planDefinition.action.length > 0) {
+        const prevAction = planDefinition.action[planDefinition.action.length - 1];
+        // Only add the relation if the previous action wasn't a Response Path
+        if (!prevAction.condition) {
+            action.relatedAction = [{
+                actionId: prevAction.id,
+                relationship: "after-end"
+            }];
+        }
+    }
+
+    // Add any conditions from the node
+    if (node.data.condition) {
+        action.condition = [createConditionElement(node.data.condition)];
+    }
+
+    planDefinition.action.push(action);
+}
+
+function handleContainerNode(node, planDefinition, trigger) {
+    if (!node.children?.length) return;
+
+    const childActions = node.children.map(child => {
+        const action = createActionFromNode(child, FHIR_BASE_URL);
+        if (child.data.condition) {
+            action.condition = [createConditionElement(child.data.condition)];
+        }
+        return action;
+    });
+
+    // Set up relationships between child actions
+    childActions.forEach((action, index) => {
+        if (index > 0) {
+            action.relatedAction = [{
+                actionId: childActions[0].id,
+                relationship: node.type === 'parallel' ? 
+                    "concurrent-with-start" : "after-end"
+            }];
+        }
+    });
+
+    // Add trigger to first child if this is the start
+    if (!planDefinition.action.length && trigger) {
+        childActions[0].trigger = [trigger];
+    }
+
+    planDefinition.action.push(...childActions);
+}
+
 
 function generateFhirPlanDefinition(workflow) {
-   const FHIR_BASE_URL = "https://healthcare.googleapis.com/v1/projects/combine-fhir-smart-store/locations/us-central1/datasets/COMBINE-FHIR-v1/fhirStores/1/fhir";
+    const FHIR_BASE_URL = "https://healthcare.googleapis.com/v1/projects/combine-fhir-smart-store/locations/us-central1/datasets/COMBINE-FHIR-v1/fhirStores/1/fhir";
 
-   const eventNode = workflow.nodes.find(n => n.type === 'event');
-   const trigger = eventNode ? generateTriggerDefinition(eventNode) : null;
+    // Find the event node that starts our workflow
+    const eventNode = workflow.nodes.find(n => n.type === 'event');
+    const trigger = eventNode ? generateTriggerDefinition(eventNode) : null;
 
-   const planDefinition = {
-       resourceType: "PlanDefinition",
-       status: "draft",
-       type: {
-           coding: [{
-               system: "http://terminology.hl7.org/CodeSystem/plan-definition-type",
-               code: "workflow-definition"
-           }]
-       },
-       name: planName,
-       ...(planTitle && { title: planTitle }),
-       ...(planSubtitle && { subtitle: planSubtitle }),
-       ...(planDescription && { description: planDescription }),
-       ...(planPurpose && { purpose: planPurpose }),
-       ...(planUsage && { usage: planUsage }),
-       date: new Date().toISOString(),
-       publisher: "CoriSystem",
-       ...(planAuthor && { author: [{ name: planAuthor }] }),
-       action: []
-   };
+    // Initialize our PlanDefinition
+    const planDefinition = {
+        resourceType: "PlanDefinition",
+        status: "draft",
+        type: {
+            coding: [{
+                system: "http://terminology.hl7.org/CodeSystem/plan-definition-type",
+                code: "workflow-definition"
+            }]
+        },
+        name: planName,
+        ...(planTitle && { title: planTitle }),
+        ...(planSubtitle && { subtitle: planSubtitle }),
+        ...(planDescription && { description: planDescription }),
+        ...(planPurpose && { purpose: planPurpose }),
+        ...(planUsage && { usage: planUsage }),
+        date: new Date().toISOString(),
+        publisher: "CoriSystem",
+        ...(planAuthor && { author: [{ name: planAuthor }] }),
+        action: []
+    };
 
-   try {
-       workflow.nodes.forEach(node => {
-           if (node.type === 'parallel' || node.type === 'sequence') {
-               if (node.children?.length) {
-                   const childActions = node.children.map(child => {
-                       const action = {
-                           id: child.id,
-                           title: child.data.title,
-                           definitionCanonical: `${FHIR_BASE_URL}/ActivityDefinition/${child.data.template}`,
-                           type: {
-                               coding: [{
-                                   system: "http://terminology.hl7.org/CodeSystem/action-type",
-                                   code: "create"
-                               }]
-                           }
-                       };
+    try {
+        // Process each node in the workflow
+        workflow.nodes.forEach(node => {
+            // Handle container nodes (parallel/sequence)
+            if (node.type === 'parallel' || node.type === 'sequence') {
+                handleContainerNode(node, planDefinition, trigger);
+                return;
+            }
 
-                       if (child.data.condition) {
-                           action.condition = [createConditionElement(child.data.condition)];
-                       }
+            // Skip child nodes - they're handled by their containers
+            if (node.data.containerId) return;
 
-                       return action;
-                   });
+            // Process regular activity nodes
+            if (node.type === 'activity') {
+                const action = createActionFromNode(node, FHIR_BASE_URL);
+                
+                // If this is a Response Path activity, we need special handling
+                if (node.data.isResponseNode) {
+                    handleResponsePathNode(node, action, workflow, planDefinition);
+                } else {
+                    // Regular sequential activity
+                    handleRegularNode(node, action, workflow, planDefinition, trigger);
+                }
+            }
+        });
 
-                   childActions.forEach((action, index) => {
-                       if (index > 0) {
-                           if (!action.relatedAction) action.relatedAction = [];
-                           action.relatedAction.push({
-                               actionId: childActions[0].id,
-                               relationship: node.type === 'parallel' ? 
-                                   "concurrent-with-start" : "after-end"
-                           });
-                       }
-                       if (index === 0 && trigger) {
-                           action.trigger = [trigger];
-                       }
-                   });
+        return planDefinition;
 
-                   planDefinition.action.push(...childActions);
-               }
-           } else if (node.type === 'activity' && !node.data.containerId) {
-               const action = {
-                   id: node.id,
-                   title: node.data.title,
-                   definitionCanonical: `${FHIR_BASE_URL}/ActivityDefinition/${node.data.template}`,
-                   type: {
-                       coding: [{
-                           system: "http://terminology.hl7.org/CodeSystem/action-type",
-                           code: "create"
-                       }]
-                   }
-               };
-
-               if (node.data.condition) {
-                   action.condition = [createConditionElement(node.data.condition)];
-               }
-
-               if (!planDefinition.action.length && trigger) {
-                   action.trigger = [trigger];
-               } else if (planDefinition.action.length > 0) {
-                   action.relatedAction = [{
-                       actionId: planDefinition.action[planDefinition.action.length - 1].id,
-                       relationship: "after-end"
-                   }];
-               }
-
-               planDefinition.action.push(action);
-           }
-       });
-
-       return planDefinition;
-
-   } catch (error) {
-       console.error('Error generating FHIR PlanDefinition:', error);
-       return null;
-   }
+    } catch (error) {
+        console.error('Error generating FHIR PlanDefinition:', error);
+        return null;
+    }
 }
 
   
@@ -262,7 +339,7 @@ function generateFhirPlanDefinition(workflow) {
     isDragOver = false;
   }
 
-  function handleDragOver(event) {
+function handleDragOver(event) {
   //  console.log('Canvas: Drag OVER');
     // Important: These are required for drop to work
     event.preventDefault();
@@ -271,48 +348,113 @@ function generateFhirPlanDefinition(workflow) {
   }
 
   function handleDrop(event) {
-  event.preventDefault();
-  event.stopPropagation();
-  isDragOver = false;
-  
-  try {
-    let jsonData = event.dataTransfer.getData('application/json');
-    if (!jsonData) {
-      jsonData = event.dataTransfer.getData('text/plain');
+    event.preventDefault();
+    event.stopPropagation();
+    isDragOver = false;
+    
+    try {
+        let jsonData = event.dataTransfer.getData('application/json');
+        if (!jsonData) {
+            jsonData = event.dataTransfer.getData('text/plain');
+        }
+
+        if (!jsonData) {
+            throw new Error('No valid data received');
+        }
+
+        const data = JSON.parse(jsonData);
+        const rect = canvasEl.getBoundingClientRect();
+        const position = {
+            x: event.clientX - rect.left + canvasEl.scrollLeft,
+            y: event.clientY - rect.top + canvasEl.scrollTop
+        };
+
+        // Check if dropping on a container
+        const containerEl = event.target.closest('.container-zone');
+        if (containerEl) {
+            const containerId = containerEl.dataset.nodeId;
+            data.containerId = containerId;
+        }
+
+        // Enhanced ResponsePath detection
+        if (data.type === 'activity' && data.template) {
+            const outputs = new Set();
+            let hasResponseOutput = false;
+
+            // Collect all output names and check for response-type outputs
+            data.template.dynamicValue?.forEach(dv => {
+                if (dv.path.startsWith('/Task/output[')) {
+                    // Extract the output name from the path
+                    const match = dv.path.match(/output\[(.*?)\]/);
+                    if (match) {
+                        const outputName = match[1];
+                        outputs.add(outputName);
+                        
+                        // Check if this is a response-type output
+                        if (dv.path.includes('/type') && 
+                            dv.expression?.expression === 'string' &&
+                            outputName.includes('response')) {
+                            hasResponseOutput = true;
+                        }
+                    }
+                }
+            });
+
+            // If we have multiple outputs including a response output, treat as ResponsePath
+            const isResponsePath = outputs.size >= 2 && hasResponseOutput;
+
+            if (isResponsePath) {
+                data.isResponseNode = true;
+                data.width = 240;
+                data.height = 160;
+                
+                // Create outputs array based on the actual outputs found
+                data.outputs = [
+                    {
+                        id: `${data.id || 'node'}-output`,
+                        name: 'sent',
+                        type: 'standard',
+                        position: 'middle'
+                    }
+                ];
+
+                // Add response outputs
+                if (outputs.has('send-email-response')) {
+                    data.outputs.push({
+                        id: `${data.id || 'node'}-approved`,
+                        name: 'approved',
+                        type: 'response',
+                        responseValue: 'approved',
+                        position: 'bottom'
+                    });
+                    data.outputs.push({
+                        id: `${data.id || 'node'}-rejected`,
+                        name: 'rejected',
+                        type: 'response',
+                        responseValue: 'rejected',
+                        position: 'bottom'
+                    });
+                }
+            }
+        }
+
+        const newNode = {
+            id: `node-${Date.now()}`,
+            type: data.type,
+            position,
+            data: {
+                ...data,
+                containerId: data.containerId,
+                width: data.width || 150,
+                height: data.height || 80,
+                outputs: data.outputs
+            }
+        };
+
+        workflowStore.addNode(newNode);
+    } catch (error) {
+        console.error('Drop error:', error);
     }
-
-    if (!jsonData) {
-      throw new Error('No valid data received');
-    }
-
-    const data = JSON.parse(jsonData);
-    const rect = canvasEl.getBoundingClientRect();
-    const position = {
-      x: event.clientX - rect.left + canvasEl.scrollLeft,
-      y: event.clientY - rect.top + canvasEl.scrollTop
-    };
-
-    // Check if dropping on a container
-    const containerEl = event.target.closest('.container-zone');
-    if (containerEl) {
-      const containerId = containerEl.dataset.nodeId;
-      data.containerId = containerId;
-    }
-
-    const newNode = {
-      id: `node-${Date.now()}`,
-      type: data.type,
-      position,
-      data: {
-        ...data,
-        containerId: data.containerId
-      }
-    };
-
-    workflowStore.addNode(newNode);
-  } catch (error) {
-    console.error('Drop error:', error);
-  }
 }
 
   function handleCanvasClick(event) {
@@ -343,9 +485,21 @@ function generateFhirPlanDefinition(workflow) {
     window.addEventListener('mouseup', handleConnectionEnd);
   }
 
-  function canConnect(sourceType, targetType) {
-    return sourceType === 'output' && targetType === 'input';
-  }
+  function canConnect(sourcePort, targetPort) {
+      if (!sourcePort || !targetPort) return false;
+      
+      // Allow connections from standard outputs to inputs
+      if (sourcePort.dataset?.type === 'output' && targetPort.dataset?.type === 'input') {
+        return true;
+      }
+      
+      // Allow connections from response outputs to inputs
+      if (sourcePort.dataset?.responseValue && targetPort.dataset?.type === 'input') {
+        return true;
+      }
+      
+      return false;
+    }
 
   function handleConnectionEnd(event) {
     if (!dragState) return;
@@ -356,28 +510,27 @@ function generateFhirPlanDefinition(workflow) {
 
     // Check if we dropped on a port
     const portElement = event.target.closest('.port');
-    if (portElement) {
-      const targetNodeId = portElement.dataset.nodeId;
-      const targetPortId = portElement.dataset.portId;
-      const targetPortType = portElement.dataset.portType;
+  if (portElement) {
+    const targetNodeId = portElement.dataset.nodeId;
+    const targetPortId = portElement.dataset.portId;
+    const targetPortType = portElement.dataset.portType;
 
-      // Validate connection
-      if (canConnect(dragState.portType, targetPortType)) {
-        const edge = {
-          id: `edge-${Date.now()}`,
-          source: dragState.sourceNodeId,
-          target: targetNodeId,
-          sourcePort: dragState.sourcePortId,
-          targetPort: targetPortId
-        };
-        
-        console.log('Creating edge:', edge);
-        workflowStore.addEdge(edge);
-      }
+    if (canConnect(dragState.sourcePort, portElement)) {
+      const edge = {
+        id: `edge-${Date.now()}`,
+        source: dragState.sourceNodeId,
+        target: targetNodeId,
+        sourcePort: dragState.sourcePortId,
+        targetPort: targetPortId,
+        responseValue: dragState.sourcePort.dataset.responseValue
+      };
+      
+      workflowStore.addEdge(edge);
     }
-
-    dragState = null;
   }
+
+  dragState = null;
+}
 
   function calculateEdgePoints(sourceNode, targetNode) {
     if (!sourceNode || !targetNode) return null;
@@ -573,24 +726,20 @@ function generateFhirPlanDefinition(workflow) {
   >
     <svg class="edge-layer">
       <!-- Existing edges -->
-      {#each workflow.edges as edge (edge.id)}
-        {@const points = calculateEdgePoints(
-          workflow.nodes.find(n => n.id === edge.source),
-          workflow.nodes.find(n => n.id === edge.target)
-        )}
-        {#if points}
-          <path
-            class="edge"
-            d={`M ${points.start.x} ${points.start.y} 
-                C ${points.start.x + 50} ${points.start.y},
-                  ${points.end.x - 50} ${points.end.y},
-                  ${points.end.x} ${points.end.y}`}
-            stroke="#666"
-            stroke-width="2"
-            fill="none"
-          />
-        {/if}
-      {/each}
+      {#each edgeData as data}
+      <path
+        class="edge"
+        class:response-edge={data.isResponsePath}
+        d={`M ${data.points.start.x} ${data.points.start.y} 
+            C ${data.points.start.x + 50} ${data.points.start.y},
+              ${data.points.end.x - 50} ${data.points.end.y},
+              ${data.points.end.x} ${data.points.end.y}`}
+        stroke={data.isResponsePath ? '#6366f1' : '#666'}
+        stroke-width={data.isResponsePath ? 3 : 2}
+        stroke-dasharray={data.isResponsePath ? '8,4' : 'none'}
+        fill="none"
+      />
+    {/each}
 
       <!-- Preview line while dragging -->
       {#if dragState && currentMousePosition}
@@ -702,6 +851,11 @@ function generateFhirPlanDefinition(workflow) {
   .edge:hover {
     stroke: #4A90E2;
     stroke-width: 3;
+  }
+
+  .response-path-edge:hover {
+    stroke: #818cf8;
+    stroke-width: 4;
   }
 
       .canvas.is-drag-over {

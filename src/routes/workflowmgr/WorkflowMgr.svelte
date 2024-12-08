@@ -1,7 +1,7 @@
 <script>
     import { onMount } from 'svelte';
     import { base } from '$app/paths'; 
-    
+
     
     // Enhanced state management
     let workflows = {
@@ -21,14 +21,15 @@
     // Fetch all workflow-related resources
     async function loadWorkflows() {
       try {
-        // Load workflow definitions
-        const planDefinitionsResponse = await callFhirApi('GET', '/PlanDefinition', {
-          params: {
-            type: 'workflow-definition',
-            status: 'active',
-            _include: ['PlanDefinition:depends-on'] // Include referenced Basic Plans
-          }
+
+        // Load workflows and include referenced Basic Plans
+        const planDefinitionsResponse = await fetch(`${base}/api/plandefinition/allbasicplansplus`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
         });
+
         workflows.available = planDefinitionsResponse.entry?.map(e => e.resource) || [];
   
         // Load all workflow Tasks with different statuses

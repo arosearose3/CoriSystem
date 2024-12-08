@@ -15,9 +15,22 @@ function createWorkflowStore() {
     subscribe,
     updateNode: (nodeId, nodeData) => update(state => ({
       ...state,
-      nodes: state.nodes.map(node =>
-        node.id === nodeId ? { ...node, ...nodeData } : node
-      )
+      nodes: state.nodes.map(node => {
+        if (node.id === nodeId) {
+          // Preserve existing outputs if they're not being updated
+          const outputs = nodeData.outputs || node.data.outputs || [];
+          return {
+            ...node,
+            ...nodeData,
+            data: {
+              ...node.data,
+              ...nodeData.data,
+              outputs
+            }
+          };
+        }
+        return node;
+      })
     })),
     updateNodeCondition: (nodeId, condition) => update(state => ({
       ...state,
@@ -28,10 +41,45 @@ function createWorkflowStore() {
       )
     })),
     addNode: (node) => update(state => {
-      // Don't add nodes that belong in containers to the main canvas
       if (node.data.containerId) {
         return state;
       }
+
+      // Configure outputs based on node type
+      if (node.data.isResponseNode) {
+        node.data.outputs = [
+          {
+            id: `${node.id}-output`,
+            name: 'sent',
+            type: 'standard',
+            position: 'bottom'
+          },
+          {
+            id: `${node.id}-approved`,
+            name: 'approved',
+            type: 'response',
+            responseValue: 'approved',
+            position: 'right'
+          },
+          {
+            id: `${node.id}-rejected`,
+            name: 'rejected',
+            type: 'response',
+            responseValue: 'rejected',
+            position: 'right'
+          }
+        ];
+      } else {
+        node.data.outputs = [
+          {
+            id: `${node.id}-output`,
+            name: 'output',
+            type: 'standard',
+            position: 'right'
+          }
+        ];
+      }
+
       return {
         ...state,
         nodes: [...state.nodes, node]
@@ -95,10 +143,22 @@ function createWorkflowStore() {
         nodes: updatedNodes
       };
     }),
-    addEdge: (edge) => update(state => ({
-      ...state,
-      edges: [...state.edges, edge]
-    })),
+    addEdge: (edge) => update(state => {
+      // Find the source node and output
+      const sourceNode = state.nodes.find(n => n.id === edge.source);
+      const sourceOutput = sourceNode?.data.outputs?.find(o => o.id === edge.sourcePort);
+
+      // If this is a response connection, add response metadata
+      if (sourceOutput?.type === 'response') {
+        edge.responseValue = sourceOutput.responseValue;
+        edge.isResponsePath = true;
+      }
+
+      return {
+        ...state,
+        edges: [...state.edges, edge]
+      };
+    }),
     removeEdge: (edgeId) => update(state => ({
       ...state,
       edges: state.edges.filter(e => e.id !== edgeId)
@@ -111,4 +171,14 @@ function createWorkflowStore() {
   };
 }
 
+
 export const workflowStore = createWorkflowStore();
+
+export const responseNodes = derived(workflowStore, $store => 
+  $store.nodes.filter(node => node.data.isResponseNode)
+);
+
+export const responseEdges = derived(workflowStore, $store =>
+  $store.edges.filter(edge => edge.isResponsePath)
+);
+

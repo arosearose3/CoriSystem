@@ -15,15 +15,6 @@ const router = express.Router();
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
 
-import express from 'express';
-import axios from 'axios';
-import { auth, PROJECT_ID, LOCATION, DATASET_ID, FHIR_STORE_ID } from '../serverutils.js';
-import { getFhirAccessToken } from '../src/lib/auth/auth.js';
-
-const router = express.Router();
-const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
-
-
 // Endpoint to fetch PlanDefinition and related Basic plans
 router.get('/allbasicplansplus', async (req, res) => {
   try {
@@ -68,9 +59,6 @@ router.get('/allbasicplansplus', async (req, res) => {
     });
   }
 });
-
-export default router;
-
 
 
 // Get all PlanDefinitions with type coding code equal to "workflow-definition"

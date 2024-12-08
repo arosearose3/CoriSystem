@@ -1,8 +1,5 @@
 <script>
-
-
-    import {WorkflowMgr} from './WorkflowMgr.svelte';
-
+    import WorkflowMgr from './WorkflowMgr.svelte';
 </script>
 
 <WorkflowMgr />

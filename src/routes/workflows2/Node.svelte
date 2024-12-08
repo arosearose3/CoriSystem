@@ -5,12 +5,74 @@
     import { slide } from 'svelte/transition';
     import X  from 'lucide-svelte/icons/x';
     import Filter from 'lucide-svelte/icons/filter';
-    import ConditionBuilder from './fhirpath/FhirpathConditionBuilder.svelte';
+   // import ConditionBuilder from './fhirpath/FhirpathConditionBuilder.svelte';
  
     import { workflowStore } from './workflowstore.js';
   
     export let node;
     export let selected = false;
+
+    $: isResponseNode = node.data.isResponseNode;
+    $: outputs = node.data.outputs || [];
+    $: standardOutput = outputs.find(o => o.type === 'standard');
+    $: responseOutputs = outputs.filter(o => o.type === 'response');
+
+    $: responseValues = responseOutputs.map(o => o.responseValue);
+    $: isAsyncNode = isResponseNode && responseValues.length > 0;
+    
+
+    function getPortPosition(output, index) {
+        // Input port is always centered on left side
+        if (output.type === 'input') {
+            return {
+                top: '50%',
+                left: '-6px',
+                transform: 'translateY(-50%)'
+            };
+        }
+
+        if (!isResponseNode) {
+            // Standard nodes just have centered output
+            return {
+                top: '50%',
+                right: '-6px',
+                transform: 'translateY(-50%)'
+            };
+        }
+
+        // For response nodes, we position outputs differently
+        if (output.type === 'standard') {
+            // Standard output goes in middle
+            return {
+                top: '50%',
+                right: '-6px',
+                transform: 'translateY(-50%)'
+            };
+        }
+
+        // Calculate positions for response outputs
+        const responseIndex = responseOutputs.findIndex(o => o.id === output.id);
+        const totalResponses = responseOutputs.length;
+        
+        const topOffset = 100 / (totalResponses + 1);
+        const topPosition = topOffset * (responseIndex + 1);
+
+          return {
+              top: `${topPosition}%`,
+              right: '-8px',
+              transform: 'translateY(-50%)'
+          };
+}
+
+
+    let ConditionBuilder;
+    async function loadConditionBuilder() {
+        if (!ConditionBuilder) {
+            const module = await import('./fhirpath/FhirpathConditionBuilder.svelte');
+            ConditionBuilder = module.default;
+        }
+    }
+
   
     const dispatch = createEventDispatcher();
     
@@ -190,18 +252,20 @@ function handleConditionBuilderClose() {
   </script>
   
   <div
-    bind:this={nodeEl}
-    class="node {node.type}"
-    class:selected
-    class:is-container={isContainer}
-    style="
+  bind:this={nodeEl}
+  class="node {node.type}"
+  class:selected
+  class:is-container={isContainer}
+  class:response-node={isResponseNode}
+  class:async-node={isAsyncNode}
+  style="
       left: {position.x}px;
       top: {position.y}px;
-      width: {node.data.width}px;
-      min-height: {node.data.height}px;
-    "
-    on:mousedown={handleMouseDown}
-  >
+      width: {node.data.width || (isResponseNode ? 240 : 150)}px;
+      min-height: {node.data.height || (isResponseNode ? 160 : 80)}px;
+  "
+  on:mousedown={handleMouseDown}
+>
     <!-- Remove Button -->
     <button 
       class="remove-btn"
@@ -215,6 +279,16 @@ function handleConditionBuilderClose() {
     <div class="node-content">
       <h3 class="node-title">
         {node.data.title}
+        {#if isResponseNode}
+        <div class="response-paths-info">
+            <span class="response-count">{responseValues.length} Response {responseValues.length === 1 ? 'Path' : 'Paths'}</span>
+            <div class="response-values">
+                {#each responseValues as value}
+                    <span class="response-tag">{value}</span>
+                {/each}
+            </div>
+        </div>
+    {/if}
       </h3>
       {#if node.type === 'activity'}
       <button 
@@ -287,28 +361,126 @@ function handleConditionBuilderClose() {
     on:mousedown={(e) => handlePortMouseDown(e, 'input')}
   />
   
-  <div
-    class="port port-output"
-    data-node-id={node.id}
-    data-port-id="{node.id}-output"
-    data-port-type="output"
-    on:mousedown={(e) => handlePortMouseDown(e, 'output')}
-  />
-  </div>  
+  <!-- Output Ports -->
+  {#each outputs as output, index}
+        {@const portPosition = getPortPosition(output)}
+        <div
+            class="port port-output"
+            class:port-response={output.type === 'response'}
+            style="
+                top: {portPosition.top};
+                right: {portPosition.right};
+                left: {portPosition.left || 'auto'};
+                transform: {portPosition.transform};
+            "
+            data-node-id={node.id}
+            data-port-id={output.id}
+            data-port-type="output"
+            data-response-value={output.responseValue}
+            on:mousedown={(e) => handlePortMouseDown(e, 'output', output)}
+        >
+            <span class="port-label {output.type === 'response' ? 'response-label' : ''}">
+                {output.name}
+            </span>
+        </div>
+    {/each}
 
   {#if showConditionPanel}
-  <ConditionBuilder
-    condition={node.data.condition || ''}
-    on:change={handleConditionChange}
-    onClose={handleConditionBuilderClose}
-  />
+  {#await loadConditionBuilder() then _}
+      <svelte:component 
+          this={ConditionBuilder}
+          condition={node.data.condition || ''}
+          on:change={handleConditionChange}
+          onClose={handleConditionBuilderClose}
+      />
+  {/await}
 {/if}
+  </div>
 
 
 
   <style>
 
+.node {
+        position: absolute;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        padding: 12px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        user-select: none;
+        transition: all 0.2s ease;
+    }
 
+    /* Response node specific styling */
+    .node.response-node {
+        border-color: #6366f1;
+        background: #f5f3ff;
+        min-width: 240px;
+        min-height: 160px;
+    }
+
+    .port {
+        width: 12px;
+        height: 12px;
+        background: #4A90E2;
+        border: 2px solid white;
+        border-radius: 50%;
+        position: absolute;
+        cursor: crosshair;
+        transition: all 0.2s;
+        z-index: 2;
+    }
+
+    .port-output .port-label {
+        right: 20px;
+        transform: translateY(-50%);
+    }
+
+  .port-input {
+    left: -6px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+
+
+  .response-label {
+    color: #6366f1;
+  }
+
+  .port-response {
+    background: #6366f1;
+    width: 14px;
+    height: 14px;
+  }
+
+  .port-response::after {
+    content: attr(data-response-value);
+    position: absolute;
+    right: 20px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 11px;
+    color: #6366f1;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .response-indicator {
+        font-size: 11px;
+        padding: 2px 6px;
+        background: #6366f1;
+        color: white;
+        border-radius: 12px;
+        margin-left: 8px;
+        font-weight: normal;
+    }
+
+
+  .port-response:hover::after {
+    opacity: 1;
+  }
 
 .container-zone {
   margin: 8px -4px;
@@ -365,18 +537,7 @@ function handleConditionBuilderClose() {
 
 
 
-    .node {
-      position: absolute;
-      background: white;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      padding: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-      user-select: none;
-      cursor: move;
-      transition: box-shadow 0.2s;
-    }
-  
+
     .node.selected {
       box-shadow: 0 0 0 2px #3b82f6;
     }
@@ -398,17 +559,7 @@ function handleConditionBuilderClose() {
       padding-right: 24px;
     }
   
-    .port {
-    width: 12px;
-    height: 12px;
-    background-color: #4A90E2;
-    border: 2px solid white;
-    border-radius: 50%;
-    position: absolute;
-    cursor: crosshair;
-    z-index: 2;
-    transition: all 0.2s;
-  }
+ 
 
   .port:hover {
     transform: scale(1.2);
@@ -416,17 +567,8 @@ function handleConditionBuilderClose() {
     box-shadow: 0 0 0 2px rgba(74, 144, 226, 0.3);
   }
 
-  .port-input {
-    top: 50%;
-    left: -6px;
-    transform: translateY(-50%);
-  }
+ 
 
-  .port-output {
-    top: 50%;
-    right: -6px;
-    transform: translateY(-50%);
-  }
   
     .remove-btn {
       position: absolute;
@@ -566,6 +708,56 @@ function handleConditionBuilderClose() {
   }
 
 
+  .response-paths-info {
+    margin-top: 8px;
+    padding: 4px 8px;
+    background: rgba(99, 102, 241, 0.1);
+    border-radius: 4px;
+    font-size: 11px;
+}
 
+.response-count {
+    color: #6366f1;
+    font-weight: 500;
+}
+
+.response-values {
+    margin-top: 4px;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.response-tag {
+    padding: 2px 6px;
+    background: #6366f1;
+    color: white;
+    border-radius: 12px;
+    font-size: 10px;
+}
+
+.async-node .node-title::after {
+    content: "⏳";
+    margin-left: 6px;
+    font-size: 12px;
+}
+
+/* Update existing styles */
+.port-response {
+    background: #6366f1;
+    width: 14px;
+    height: 14px;
+    transition: all 0.2s ease-in-out;
+}
+
+.port-response:hover {
+    transform: scale(1.2);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.response-label {
+    color: #6366f1;
+    font-weight: 500;
+}
 
   </style>
