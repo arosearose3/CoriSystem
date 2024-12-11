@@ -40,51 +40,87 @@ function createWorkflowStore() {
           : node
       )
     })),
-    addNode: (node) => update(state => {
-      if (node.data.containerId) {
-        return state;
+   // Configure outputs based on node type
+// MODIFY existing addNode function:
+addNode: (node) => update(state => {
+  if (node.data.containerId) {
+      return state;
+  }
+
+  node.data.inputs = node.data.inputs || [{  
+    id: `${node.id}-input`,
+    name: 'input',
+    type: 'standard',
+    position: 'left'
+}];
+
+  // Configure outputs based on node type
+  if (node.type === 'event') {
+      // KEEP existing event node handling
+      node.data.outputs = [{
+          id: `${node.id}-event-output`,
+          type: 'standard',
+          name: 'trigger',
+          position: 'right'
+      }];
+  } else if (node.data.isResponseNode || // Check existing flag
+             // ADD check for dynamicValue configuration
+             node.data.dynamicValue?.some(dv => 
+                 dv.path === '/Task/async/type' && 
+                 dv.expression?.expression === 'approval'
+             )) {
+      // If we found a response path node, set the flag and dimensions
+      node.data.isResponseNode = true;
+      node.data.width = 240;
+      node.data.height = 160;
+
+      // Get valid responses from configuration if available
+      let validResponses = ['approved', 'rejected'];
+      if (node.data.dynamicValue) {
+          const responsesConfig = node.data.dynamicValue.find(dv => 
+              dv.path === '/Task/async/validResponses'
+          );
+          if (responsesConfig?.expression?.expression) {
+              try {
+                  validResponses = JSON.parse(responsesConfig.expression.expression);
+              } catch (e) {
+                  console.warn('Failed to parse validResponses, using defaults');
+              }
+          }
       }
 
-      // Configure outputs based on node type
-      if (node.data.isResponseNode) {
-        node.data.outputs = [
+      node.data.outputs = [
           {
-            id: `${node.id}-output`,
-            name: 'sent',
-            type: 'standard',
-            position: 'bottom'
+              id: `${node.id}-sent`,
+              name: 'sent',
+              type: 'standard',
+              position: 'bottom'
           },
+          ...validResponses.map(response => ({
+              id: `${node.id}-${response}`,
+              name: response,
+              type: 'response',
+              responseValue: response,
+              position: 'right'
+          }))
+      ];
+  } else {
+      // KEEP existing default output configuration
+      node.data.outputs = [
           {
-            id: `${node.id}-approved`,
-            name: 'approved',
-            type: 'response',
-            responseValue: 'approved',
-            position: 'right'
-          },
-          {
-            id: `${node.id}-rejected`,
-            name: 'rejected',
-            type: 'response',
-            responseValue: 'rejected',
-            position: 'right'
+              id: `${node.id}-output`,
+              name: 'output',
+              type: 'standard',
+              position: 'right'
           }
-        ];
-      } else {
-        node.data.outputs = [
-          {
-            id: `${node.id}-output`,
-            name: 'output',
-            type: 'standard',
-            position: 'right'
-          }
-        ];
-      }
+      ];
+  }
 
-      return {
-        ...state,
-        nodes: [...state.nodes, node]
-      };
-    }),
+  return {
+      ...state,
+      nodes: [...state.nodes, node]
+  };
+}),
 
     addContainedNode: (containerId, childNode) => update(state => {
       const updatedNodes = state.nodes.map(n => {

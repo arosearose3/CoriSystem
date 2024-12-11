@@ -27,23 +27,29 @@
 
   function processActivityDefinition(resource) {
     return {
-      id: resource.id,
-      name: resource.name,
-      title: resource.title,
-      description: resource.description,
-      type: 'activity',
-      status: resource.status,
-      kind: resource.kind, // ActivityDefinition specific
-      properties: {
-        code: resource.code,
-        priority: resource.priority,
-        doNotPerform: resource.doNotPerform,
-        timing: resource.timing,
-        location: resource.location,
-        participant: resource.participant
-      }
+        id: resource.id,
+        name: resource.name,
+        title: resource.title,
+        description: resource.description,
+        type: 'activity',
+        status: resource.status,
+        kind: resource.kind,
+        properties: {
+            code: resource.code,
+            priority: resource.priority,
+            doNotPerform: resource.doNotPerform,
+            timing: resource.timing,
+            location: resource.location,
+            participant: resource.participant
+        },
+        
+        dynamicValue: resource.dynamicValue,
+        isResponseNode: resource.dynamicValue?.some(dv => 
+            dv.path === '/Task/async/type' && 
+            dv.expression?.expression === 'approval'
+        )
     };
-  }
+}
 
   onMount(async () => {
     try {
@@ -66,38 +72,41 @@
     }
 });
 
-  function handleDragStart(event, template) {
+function handleDragStart(event, template) {
     console.log('ActivityPalette: Starting drag for template:', template);
     event.stopPropagation();
 
     const data = template.isContainer ? {
-      type: template.type,
-      title: template.title,
-      isContainer: true,
-      width: 300,
-      height: 200,
-      children: []
+        type: template.type,
+        title: template.title,
+        isContainer: true,
+        width: 300,
+        height: 200,
+        children: []
     } : {
-      type: 'activity',
-      title: template.title || template.name || 'Untitled Activity',
-      activityType: template.kind,
-      properties: template.properties || {},
-      isActivity: true,
-      width: 200,
-      height: 80,
-      template: template.id
+        type: 'activity',
+        title: template.title || template.name || 'Untitled Activity',
+        activityType: template.kind,
+        properties: template.properties || {},
+        isActivity: true,
+        width: 200,
+        height: 80,
+        template: template.id,
+        // ADD these properties:
+        dynamicValue: template.dynamicValue,
+        isResponseNode: template.isResponseNode
     };
 
     try {
-      event.dataTransfer.setData('application/json', JSON.stringify(data));
-      event.dataTransfer.setData('text/plain', JSON.stringify(data));
-      event.dataTransfer.effectAllowed = 'copy';
+        event.dataTransfer.setData('application/json', JSON.stringify(data));
+        event.dataTransfer.setData('text/plain', JSON.stringify(data));
+        event.dataTransfer.effectAllowed = 'copy';
     } catch (err) {
-      console.error('Error in drag start:', err);
+        console.error('Error in drag start:', err);
     }
 
     dispatch('dragstart', { template });
-  }
+}
 </script>
 
 <!-- Template remains largely the same, just updated text -->

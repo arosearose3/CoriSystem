@@ -347,11 +347,9 @@ function handleDragOver(event) {
     isDragOver = true;
   }
 
-  function handleDrop(event) {
-    event.preventDefault();
-    event.stopPropagation();
-    isDragOver = false;
-    
+// In Canvas.svelte handleDrop function:
+
+function handleDrop(event) {
     try {
         let jsonData = event.dataTransfer.getData('application/json');
         if (!jsonData) {
@@ -369,72 +367,46 @@ function handleDragOver(event) {
             y: event.clientY - rect.top + canvasEl.scrollTop
         };
 
-        // Check if dropping on a container
-        const containerEl = event.target.closest('.container-zone');
-        if (containerEl) {
-            const containerId = containerEl.dataset.nodeId;
-            data.containerId = containerId;
-        }
-
-        // Enhanced ResponsePath detection
+        // REVISED - Detection of Response Path activities
         if (data.type === 'activity' && data.template) {
-            const outputs = new Set();
-            let hasResponseOutput = false;
+            const dynamicValues = data.template.dynamicValue || [];
+            
+            // Check for async/response path configuration
+            const isResponsePath = dynamicValues.some(dv => 
+                dv.path === '/Task/async/type' && 
+                dv.expression?.expression === 'approval'
+            );
 
-            // Collect all output names and check for response-type outputs
-            data.template.dynamicValue?.forEach(dv => {
-                if (dv.path.startsWith('/Task/output[')) {
-                    // Extract the output name from the path
-                    const match = dv.path.match(/output\[(.*?)\]/);
-                    if (match) {
-                        const outputName = match[1];
-                        outputs.add(outputName);
-                        
-                        // Check if this is a response-type output
-                        if (dv.path.includes('/type') && 
-                            dv.expression?.expression === 'string' &&
-                            outputName.includes('response')) {
-                            hasResponseOutput = true;
-                        }
-                    }
-                }
-            });
-
-            // If we have multiple outputs including a response output, treat as ResponsePath
-            const isResponsePath = outputs.size >= 2 && hasResponseOutput;
-
+            // If it's a response path activity, get the valid responses
             if (isResponsePath) {
+                const validResponsesValue = dynamicValues.find(dv => 
+                    dv.path === '/Task/async/validResponses'
+                )?.expression?.expression || '["approved", "rejected"]';
+                
+                // Parse the response values - handle string format '["approved", "rejected"]'
+                const validResponses = JSON.parse(validResponsesValue);
+
+                // Configure the node as a Response Path node
                 data.isResponseNode = true;
                 data.width = 240;
                 data.height = 160;
-                
-                // Create outputs array based on the actual outputs found
+
+                // Set up the outputs
                 data.outputs = [
                     {
-                        id: `${data.id || 'node'}-output`,
+                        id: `${data.id || 'node'}-sent`,
                         name: 'sent',
                         type: 'standard',
-                        position: 'middle'
-                    }
+                        position: 'bottom'
+                    },
+                    ...validResponses.map(response => ({
+                        id: `${data.id || 'node'}-${response}`,
+                        name: response,
+                        type: 'response',
+                        responseValue: response,
+                        position: 'right'
+                    }))
                 ];
-
-                // Add response outputs
-                if (outputs.has('send-email-response')) {
-                    data.outputs.push({
-                        id: `${data.id || 'node'}-approved`,
-                        name: 'approved',
-                        type: 'response',
-                        responseValue: 'approved',
-                        position: 'bottom'
-                    });
-                    data.outputs.push({
-                        id: `${data.id || 'node'}-rejected`,
-                        name: 'rejected',
-                        type: 'response',
-                        responseValue: 'rejected',
-                        position: 'bottom'
-                    });
-                }
             }
         }
 
@@ -452,10 +424,12 @@ function handleDragOver(event) {
         };
 
         workflowStore.addNode(newNode);
+
     } catch (error) {
         console.error('Drop error:', error);
     }
 }
+
 
   function handleCanvasClick(event) {
     if (event.target.classList.contains('canvas')) {

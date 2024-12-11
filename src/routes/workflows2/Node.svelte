@@ -64,7 +64,6 @@
         };
     }
 
-
     let ConditionBuilder;
     async function loadConditionBuilder() {
         if (!ConditionBuilder) {
@@ -353,7 +352,7 @@ function handleConditionBuilderClose() {
       </div>
     {/if}
 
-    <!-- Input Ports -->
+    <!-- Input Port -->
     <div
         class="port port-input"
         data-node-id={node.id}
@@ -361,35 +360,34 @@ function handleConditionBuilderClose() {
         data-port-type="input"
         on:mousedown={(e) => handlePortMouseDown(e, 'input')}
     />
-  
-  <!-- Output Ports -->
-  {#each outputs as output, index}
-  {@const portPosition = getPortPosition(output, index)}
-  <div
-      class="port port-output"
-      class:port-response={output.type === 'response'}
-      class:port-standard={output.type === 'standard'}
-      style="
-          top: {portPosition.top};
-          right: {portPosition.right};
-          bottom: {portPosition.bottom};
-          left: {portPosition.left};
-          transform: {portPosition.transform};
-      "
-      data-node-id={node.id}
-      data-port-id={output.id}
-      data-port-type="output"
-      data-response-value={output.responseValue}
-      on:mousedown={(e) => handlePortMouseDown(e, 'output', output)}
-  >
-      {#if output.type === 'response'}
-          <span class="port-label">
-              {output.responseValue}
-          </span>
-      {/if}
-  </div>
-{/each}
 
+  <!-- Output Ports -->
+    {#each outputs as output, index}
+        {@const portPosition = getPortPosition(output, index)}
+        <div
+            class="port port-output"
+            class:port-response={output.type === 'response'}
+            class:port-standard={output.type === 'standard'}
+            style="
+                top: {portPosition.top};
+                right: {portPosition.right};
+                bottom: {portPosition.bottom};
+                left: {portPosition.left};
+                transform: {portPosition.transform};
+            "
+            data-node-id={node.id}
+            data-port-id={output.id}
+            data-port-type="output"
+            data-response-value={output.responseValue}
+            on:mousedown={(e) => handlePortMouseDown(e, 'output', output)}
+        >
+            {#if output.type === 'response'}
+                <span class="port-label">
+                    {output.responseValue}
+                </span>
+            {/if}
+        </div>
+    {/each}
 
   {#if showConditionPanel}
   {#await loadConditionBuilder() then _}
@@ -407,6 +405,12 @@ function handleConditionBuilderClose() {
 
   <style>
 
+.async-node .node-title::after {
+        content: "⏳";
+        margin-left: 6px;
+        font-size: 12px;
+    }
+    
 .node {
         position: absolute;
         background: white;

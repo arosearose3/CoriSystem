@@ -445,8 +445,9 @@ function getFormattedInputs(dynamicValues) {
 
 // Update the cleanForPreview function
 function cleanForPreview(def) {
-    const isResponsePath = def.dynamicValue.some(dv => 
-        dv.path.startsWith('/Task/async/')
+    const isResponsePath = def.dynamicValue?.some(dv => 
+       dv.path === '/Task/async/type' && 
+        dv.expression.expression === 'approval'
     );
 
     if (!isResponsePath) {
