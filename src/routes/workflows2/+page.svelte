@@ -4,7 +4,8 @@
     import ActivityManagement from './ActivityManagement.svelte';
     import EventManagement from './EventManagement.svelte';
     import WorkflowCanvasLayout from './WorkflowCanvasLayout.svelte';
-  import WorkflowCanvas from './WorkflowCanvas.svelte';
+  import Workflows from './Workflows.svelte';
+  import ActivityMonitor from './ActivityMonitor.svelte';
 
   
   let taskComponent;
@@ -42,7 +43,12 @@
   {:else if $currentView === 'workflows'}
     <div class="p-4">
       <h1 class="text-2xl font-bold">Workflows</h1>
-      <!-- Workflows component would go here -->
+      <Workflows />
+    </div>
+    {:else if $currentView === 'activities'}
+    <div class="p-4">
+      <h1 class="text-2xl font-bold">Activity Monitor</h1>
+      <ActivityMonitor />
     </div>
   {/if}
 </main>

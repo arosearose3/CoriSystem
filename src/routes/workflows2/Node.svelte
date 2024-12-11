@@ -16,10 +16,9 @@
     $: outputs = node.data.outputs || [];
     $: standardOutput = outputs.find(o => o.type === 'standard');
     $: responseOutputs = outputs.filter(o => o.type === 'response');
-
     $: responseValues = responseOutputs.map(o => o.responseValue);
     $: isAsyncNode = isResponseNode && responseValues.length > 0;
-    
+
 
     function getPortPosition(output, index) {
         // Input port is always centered on left side
@@ -31,38 +30,39 @@
             };
         }
 
-        if (!isResponseNode) {
-            // Standard nodes just have centered output
-            return {
-                top: '50%',
-                right: '-6px',
-                transform: 'translateY(-50%)'
-            };
+        // For response path activities, we have special positioning
+        if (isResponseNode) {
+            // The "sent" confirmation output goes at the bottom
+            if (output.type === 'standard') {
+                return {
+                    bottom: '-6px',
+                    left: '50%',
+                    transform: 'translateX(-50%)'
+                };
+            }
+
+            // Response outputs (like approved/rejected) get arranged on the right
+            if (output.type === 'response') {
+                const responseIndex = responseOutputs.findIndex(o => o.id === output.id);
+                const totalResponses = responseOutputs.length;
+                const topOffset = 100 / (totalResponses + 1);
+                const topPosition = topOffset * (responseIndex + 1);
+
+                return {
+                    top: `${topPosition}%`,
+                    right: '-8px',
+                    transform: 'translateY(-50%)'
+                };
+            }
         }
 
-        // For response nodes, we position outputs differently
-        if (output.type === 'standard') {
-            // Standard output goes in middle
-            return {
-                top: '50%',
-                right: '-6px',
-                transform: 'translateY(-50%)'
-            };
-        }
-
-        // Calculate positions for response outputs
-        const responseIndex = responseOutputs.findIndex(o => o.id === output.id);
-        const totalResponses = responseOutputs.length;
-        
-        const topOffset = 100 / (totalResponses + 1);
-        const topPosition = topOffset * (responseIndex + 1);
-
-          return {
-              top: `${topPosition}%`,
-              right: '-8px',
-              transform: 'translateY(-50%)'
-          };
-}
+        // For all other nodes (events, regular activities), output on the right
+        return {
+            top: '50%',
+            right: '-6px',
+            transform: 'translateY(-50%)'
+        };
+    }
 
 
     let ConditionBuilder;
@@ -177,7 +177,7 @@
       }
     }
   
-    function handlePortMouseDown(event, portType) {
+    function handlePortMouseDown(event, portType, output) {
     event.stopPropagation();
     
     const portEl = event.target;
@@ -186,17 +186,18 @@
 
     // Calculate position relative to canvas
     const position = {
-      x: rect.left - canvasRect.left + (rect.width / 2),
-      y: rect.top - canvasRect.top + (rect.height / 2)
+        x: rect.left - canvasRect.left + (rect.width / 2),
+        y: rect.top - canvasRect.top + (rect.height / 2)
     };
 
     dispatch('connectionStart', {
-      nodeId: node.id,
-      portType,
-      portId: `${node.id}-${portType}`,
-      position
+        nodeId: node.id,
+        portType,
+        portId: output ? output.id : `${node.id}-${portType}`,
+        position,
+        sourcePort: portEl  // Include the actual port element
     });
-  }
+}
   
     function handleRemoveNode() {
       workflowStore.removeNode(node.id);
@@ -352,38 +353,43 @@ function handleConditionBuilderClose() {
       </div>
     {/if}
 
-    <!-- Connection Ports -->
+    <!-- Input Ports -->
     <div
-    class="port port-input"
-    data-node-id={node.id}
-    data-port-id="{node.id}-input"
-    data-port-type="input"
-    on:mousedown={(e) => handlePortMouseDown(e, 'input')}
-  />
+        class="port port-input"
+        data-node-id={node.id}
+        data-port-id="{node.id}-input"
+        data-port-type="input"
+        on:mousedown={(e) => handlePortMouseDown(e, 'input')}
+    />
   
   <!-- Output Ports -->
   {#each outputs as output, index}
-        {@const portPosition = getPortPosition(output)}
-        <div
-            class="port port-output"
-            class:port-response={output.type === 'response'}
-            style="
-                top: {portPosition.top};
-                right: {portPosition.right};
-                left: {portPosition.left || 'auto'};
-                transform: {portPosition.transform};
-            "
-            data-node-id={node.id}
-            data-port-id={output.id}
-            data-port-type="output"
-            data-response-value={output.responseValue}
-            on:mousedown={(e) => handlePortMouseDown(e, 'output', output)}
-        >
-            <span class="port-label {output.type === 'response' ? 'response-label' : ''}">
-                {output.name}
-            </span>
-        </div>
-    {/each}
+  {@const portPosition = getPortPosition(output, index)}
+  <div
+      class="port port-output"
+      class:port-response={output.type === 'response'}
+      class:port-standard={output.type === 'standard'}
+      style="
+          top: {portPosition.top};
+          right: {portPosition.right};
+          bottom: {portPosition.bottom};
+          left: {portPosition.left};
+          transform: {portPosition.transform};
+      "
+      data-node-id={node.id}
+      data-port-id={output.id}
+      data-port-type="output"
+      data-response-value={output.responseValue}
+      on:mousedown={(e) => handlePortMouseDown(e, 'output', output)}
+  >
+      {#if output.type === 'response'}
+          <span class="port-label">
+              {output.responseValue}
+          </span>
+      {/if}
+  </div>
+{/each}
+
 
   {#if showConditionPanel}
   {#await loadConditionBuilder() then _}
@@ -412,12 +418,14 @@ function handleConditionBuilderClose() {
         transition: all 0.2s ease;
     }
 
+    .node[data-node-type="event"] .port-output {
+    background: #48bb78;
+}
+
     /* Response node specific styling */
     .node.response-node {
         border-color: #6366f1;
         background: #f5f3ff;
-        min-width: 240px;
-        min-height: 160px;
     }
 
     .port {
@@ -432,10 +440,25 @@ function handleConditionBuilderClose() {
         z-index: 2;
     }
 
-    .port-output .port-label {
-        right: 20px;
-        transform: translateY(-50%);
+    .port-standard {
+        background: #4A90E2;
     }
+
+    .port-label {
+        position: absolute;
+        right: 20px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 11px;
+        color: #6366f1;
+        white-space: nowrap;
+        opacity: 0;
+        transition: opacity 0.2s;
+    }
+    .port-output {
+    background: #4A90E2;
+    position: absolute;
+}
 
   .port-input {
     left: -6px;
@@ -444,7 +467,10 @@ function handleConditionBuilderClose() {
   }
 
 
-
+    .port:hover .port-label {
+        opacity: 1;
+    }
+    
   .response-label {
     color: #6366f1;
   }

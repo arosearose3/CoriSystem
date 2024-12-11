@@ -486,43 +486,67 @@ function handleDragOver(event) {
   }
 
   function canConnect(sourcePort, targetPort) {
-      if (!sourcePort || !targetPort) return false;
-      
-      // Allow connections from standard outputs to inputs
-      if (sourcePort.dataset?.type === 'output' && targetPort.dataset?.type === 'input') {
-        return true;
-      }
-      
-      // Allow connections from response outputs to inputs
-      if (sourcePort.dataset?.responseValue && targetPort.dataset?.type === 'input') {
-        return true;
-      }
-      
-      return false;
-    }
+  if (!sourcePort || !targetPort) {
+    console.log('Missing source or target port');
+    return false;
+  }
 
-  function handleConnectionEnd(event) {
-    if (!dragState) return;
+  // Get the port types from the dataset
+  const sourceType = sourcePort.dataset?.portType;
+  const targetType = targetPort.dataset?.portType;
 
-    // Clean up listeners
-    window.removeEventListener('mousemove', handleMouseMove);
-    window.removeEventListener('mouseup', handleConnectionEnd);
+  // First, check if we're connecting to an input port
+  if (targetType !== 'input') {
+    console.log('Target must be an input port');
+    return false;
+  }
 
-    // Check if we dropped on a port
-    const portElement = event.target.closest('.port');
+  // Allow connections from any output port to an input port
+  if (sourcePort.classList.contains('port-output')) {
+    return true;
+  }
+
+  // Special handling for response path outputs
+  if (sourcePort.dataset?.responseValue) {
+    return true;
+  }
+
+  console.log('Connection not allowed:', {
+    sourceType,
+    targetType,
+    sourceClasses: sourcePort.classList,
+    targetClasses: targetPort.classList
+  });
+  return false;
+}
+
+function handleConnectionEnd(event) {
+  if (!dragState) return;
+
+  // Clean up listeners
+  window.removeEventListener('mousemove', handleMouseMove);
+  window.removeEventListener('mouseup', handleConnectionEnd);
+
+  // Check if we dropped on a port
+  const portElement = event.target.closest('.port');
   if (portElement) {
     const targetNodeId = portElement.dataset.nodeId;
     const targetPortId = portElement.dataset.portId;
-    const targetPortType = portElement.dataset.portType;
 
-    if (canConnect(dragState.sourcePort, portElement)) {
+    // Find the source port element
+    const sourcePort = document.querySelector(`[data-port-id="${dragState.sourcePortId}"]`);
+    
+    if (canConnect(sourcePort, portElement)) {
       const edge = {
         id: `edge-${Date.now()}`,
         source: dragState.sourceNodeId,
         target: targetNodeId,
         sourcePort: dragState.sourcePortId,
         targetPort: targetPortId,
-        responseValue: dragState.sourcePort.dataset.responseValue
+        // Include response value if this is a response path
+        ...(sourcePort.dataset.responseValue && {
+          responseValue: sourcePort.dataset.responseValue
+        })
       };
       
       workflowStore.addEdge(edge);

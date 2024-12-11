@@ -8,7 +8,8 @@
       { id: 'tasks', label: 'Activities' },
       { id: 'events', label: 'Events' },
       { id: 'workflow-canvas', label: 'Workflow Canvas' },
-      { id: 'workflows', label: 'Workflows' }
+      { id: 'workflows', label: 'Workflows' },
+      { id: 'activities', label: 'Activity Monitor' }
     ];
   </script>
   
