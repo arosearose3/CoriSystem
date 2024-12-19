@@ -26,6 +26,13 @@
   ];
 
   function processActivityDefinition(resource) {
+    if (resource.extension?.some(ext => 
+    ext.url === 'http://your-system/task-event' && 
+    ext.valueBoolean === true
+      )) {
+        return null;
+      }
+
     return {
         id: resource.id,
         name: resource.name,
@@ -44,24 +51,27 @@
         },
         
         dynamicValue: resource.dynamicValue,
-        isResponseNode: resource.dynamicValue?.some(dv => 
-            dv.path === '/Task/async/type' && 
-            dv.expression?.expression === 'approval'
-        )
+        isResponseNode: resource.dynamicValue?.some(dv => dv.path === '/Task/async/type'),
     };
 }
 
-  onMount(async () => {
+onMount(async () => {
     try {
         const response = await fetch('/api/activitydefinition/all');
         if (!response.ok) throw new Error('Failed to fetch activity templates');
         const activities = await response.json();
         console.log('ActivityPalette: Raw activities:', activities);
         
-        // Process directly as an array instead of expecting a Bundle
         templates = activities
             .filter(activity => activity.resourceType === 'ActivityDefinition')
-            .map(processActivityDefinition);
+            // Filter out activities that are part of active tasks
+            .filter(activity => 
+                !activity.extension?.some(ext => 
+                    ext.url === 'http://your-system/task-activity' && 
+                    ext.valueBoolean === true
+                )
+            )
+            .map(activity => processActivityDefinition(activity));
         
         console.log('ActivityPalette: Processed templates:', templates);
     } catch (err) {

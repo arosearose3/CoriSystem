@@ -24,6 +24,7 @@
   $: selectedNode = $workflowStore?.nodes?.find(n => n.id === $workflowStore.selectedNode);
 
   export let onClose = () => {}; 
+  export let standalone = false;
 
   let storeInitialized = false;
 onMount(() => {
@@ -143,19 +144,21 @@ function handleClose() {
   }
 
   function handleSave() {
-  if (!selectedNode) {
+  if (!standalone && !selectedNode) {
     console.error('No node selected');
     return;
   }
-  
+
   buildExpression();
-  
+
   try {
-    // Update the node using the store's method
-    workflowStore.updateNodeCondition(selectedNode.id, condition);
-    
-    // Notify parent components
-    dispatch('change', { condition });
+    // Only update store if not in standalone mode
+    if (!standalone) {
+      workflowStore.updateNodeCondition(selectedNode.id, condition);
+    }
+
+    // Always dispatch change and close
+    dispatch('change', { condition: condition });
     onClose();
   } catch (error) {
     console.error('Failed to save condition:', error);
@@ -223,7 +226,7 @@ function handleClose() {
 }
 
 function buildExpression() {
-  if (!storeInitialized || !selectedNode) {
+  if (!standalone && (!storeInitialized || !selectedNode)) {
     console.warn('Store not ready or no node selected');
     return;
   }
@@ -244,7 +247,9 @@ function buildExpression() {
     .join(' ');
 
   // Use the method directly from the store
-  workflowStore.updateNodeCondition(selectedNode.id, condition);
+  if (!standalone) {
+    workflowStore.updateNodeCondition(selectedNode.id, condition);
+  }
 }
 
   function buildOperatorExpression(expr, cond) {

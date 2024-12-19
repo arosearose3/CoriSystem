@@ -99,6 +99,39 @@ router.get('/:id', async (req, res) => {
   }
 });
 
+// Endpoint to delete a specific EventDefinition by ID
+router.delete('/:id', async (req, res) => {
+  if (!auth) {
+    return res.status(400).json({ error: 'Not connected to Google Cloud. Call /connect first.' });
+  }
+
+  const { id } = req.params;
+
+  if (!id) {
+    return res.status(400).json({ error: 'EventDefinition ID is required for deletion.' });
+  }
+
+  try {
+    const accessToken = await getFhirAccessToken();
+
+    const resourceUrl = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir/EventDefinition/${id}`;
+    
+    // Send DELETE request to the FHIR server
+    const response = await axios.delete(resourceUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/fhir+json',
+      },
+    });
+
+    res.json({ message: `EventDefinition with ID '${id}' deleted successfully.` });
+  } catch (error) {
+    console.error(`Error deleting EventDefinition with ID ${id}:`, error);
+    res.status(500).json({ error: `Failed to delete EventDefinition: ${error.message}` });
+  }
+});
+
+
 // Endpoint to update a specific EventDefinition by ID
 router.post('/update', async (req, res) => {
   if (!auth) {

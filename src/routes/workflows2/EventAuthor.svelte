@@ -1,5 +1,6 @@
 <script>
     import { nanoid } from 'nanoid';
+    import FhirpathConditionBuilder from './fhirpath/FhirpathConditionBuilder.svelte';
     
     // Core type definitions
     const EVENT_TYPES = [
@@ -28,36 +29,7 @@
      'QuestionnaireResponse'
     ];
     
-    const CONDITION_TYPES = [
-     { 
-       code: 'fhirpath', 
-       display: 'FHIRPath Expression',
-       contexts: ['fhirchange'],
-       inputType: 'expression',
-       validation: (expr) => expr.includes('.')
-     },
-     { 
-       code: 'user', 
-       display: 'User Context',
-       contexts: ['webhook', 'fhirchange', 'timer'],
-       inputType: 'context',
-       validation: (expr) => expr.startsWith('user.')
-     },
-     {
-       code: 'time',
-       display: 'Time Window',
-       contexts: ['webhook', 'timer'],
-       inputType: 'timewindow',
-       validation: (expr) => true
-     },
-     {
-       code: 'data',
-       display: 'Data Validation',
-       contexts: ['webhook', 'fhirchange'],
-       inputType: 'schema',
-       validation: (expr) => true
-     }
-    ];
+ 
     
     const OUTPUT_TIMINGS = [
       { code: 'author', display: 'Author Time' },
@@ -65,57 +37,80 @@
       { code: 'execute', display: 'Execute Time' }
     ];
 
-    // CHANGE: Output type mapping
+    const FHIR_BASE_URL = 'http://hl7.org/fhir/StructureDefinition';
+
     const OUTPUT_TYPES = {
-      string: 'string',
-      number: 'decimal',
-      boolean: 'boolean',
-      reference: 'Reference',
-      dateTime: 'dateTime',
-      code: 'code',
-      object: 'BackboneElement'
+      string: `${FHIR_BASE_URL}/string`,
+      number: `${FHIR_BASE_URL}/decimal`,
+      boolean: `${FHIR_BASE_URL}/boolean`,
+      reference: `${FHIR_BASE_URL}/Reference`,
+      dateTime: `${FHIR_BASE_URL}/dateTime`,
+      code: `${FHIR_BASE_URL}/code`,
+      object: `${FHIR_BASE_URL}/BackboneElement`
     };
 
+    const FHIR_RESOURCES_MAP = {
+      Patient: `${FHIR_BASE_URL}/Patient`,
+      Practitioner: `${FHIR_BASE_URL}/Practitioner`,
+      Organization: `${FHIR_BASE_URL}/Organization`,
+      Encounter: `${FHIR_BASE_URL}/Encounter`,
+      Observation: `${FHIR_BASE_URL}/Observation`,
+      Condition: `${FHIR_BASE_URL}/Condition`,
+      ServiceRequest: `${FHIR_BASE_URL}/ServiceRequest`,
+      Task: `${FHIR_BASE_URL}/Task`,
+      Questionnaire: `${FHIR_BASE_URL}/Questionnaire`,
+      QuestionnaireResponse: `${FHIR_BASE_URL}/QuestionnaireResponse`
+    };
+
+    const defaultTimerConfig = {
+      type: 'periodic', // or 'datetime' for one-time
+      dateTime: '', // for one-time events
+      repeat: {
+        frequency: 1,
+        period: 1,
+        periodUnit: 'd',
+        dayOfWeek: [],
+        timeOfDay: [],
+        dayOfMonth: [],
+        monthOfYear: []
+      }
+    }
+
+    const DAYS_OF_WEEK = [
+      {code: 'mon', display: 'Monday'},
+      {code: 'tue', display: 'Tuesday'},
+      {code: 'wed', display: 'Wednesday'},
+      {code: 'thu', display: 'Thursday'},
+      {code: 'fri', display: 'Friday'},
+      {code: 'sat', display: 'Saturday'},
+      {code: 'sun', display: 'Sunday'}
+    ];
+
+    const MONTHS = Array(12).fill(0).map((_, i) => ({
+      code: i + 1,
+      display: new Date(2024, i, 1).toLocaleString('default', { month: 'long' })
+    }));
 
     // Default configurations
-    const defaultConditionConfigs = {
-     fhirpath: {
-       expression: '',
-       description: ''
-     },
-     user: {
-       roles: [],
-       organizations: [],
-       permissions: []
-     },
-     time: {
-       days: [],
-       startTime: '',
-       endTime: '',
-       timezone: 'UTC'
-     },
-     data: {
-       schema: {},
-       required: []
-     }
-    };
+
 
     let saveStatus = '';
     let isSaving = false;
+
+    let showConditionBuilder = false;
+    let eventCondition = '';
+
 
     
     // Event Definition state
     let eventDef = {
       resourceType: 'EventDefinition',
-      status: 'active',
+      status: 'draft',
       name: '',
       title: '',
       description: '',
       eventType: 'webhook',
-      condition: {
-        type: '',
-        config: null
-      },
+      condition: "",
       // CHANGE: Simplified configs to focus on outputs
       webhookConfig: {
         path: `api/webhook/${nanoid(8)}`,
@@ -131,8 +126,10 @@
         action: 'all'
       }
     };
+
+
     // Trigger generation
-    function getTriggerType(eventType) {
+  function getTriggerType(eventType) {
      switch(eventType) {
        case 'webhook':
          return 'named-event';
@@ -146,51 +143,102 @@
     }
     
     function generateTrigger(def) {
-  switch(def.eventType) {
-    case 'webhook':
-      return [{
+  switch (def.eventType) {
+    case 'webhook': {
+      // For named events like webhooks, we create a simple trigger with an optional condition
+      const trigger = {
         type: "named-event",
         name: def.webhookConfig.path
-      }];
+      };
 
-    case 'timer':
-      return [{
+      // Add condition if one exists, using proper FHIR structure
+      if (def.condition) {
+        trigger.condition = {
+          language: "text/fhirpath",
+          expression: def.condition
+        };
+      }
+      return [trigger];
+    }
+
+    case 'timer': {
+      // For one-time scheduled events
+      if (def.timerConfig.type === 'datetime') {
+        const trigger = {
+          type: "periodic",
+          timingDateTime: def.timerConfig.dateTime
+        };
+
+        // Even scheduled events can have conditions
+        if (def.condition) {
+          trigger.condition = {
+            language: "text/fhirpath",
+            expression: def.condition
+          };
+        }
+        return [trigger];
+      }
+
+      // For recurring events, we use the timing structure
+      const trigger = {
         type: "periodic",
         timingTiming: {
           repeat: {
-            frequency: def.timerConfig.frequency,
-            period: def.timerConfig.period,
-            periodUnit: def.timerConfig.periodUnit
+            frequency: def.timerConfig.repeat.frequency,
+            period: def.timerConfig.repeat.period,
+            periodUnit: def.timerConfig.repeat.periodUnit
           }
         }
-      }];
+      };
 
-    case 'fhirchange':
-      return [{
+      // Add optional timing elements for complex schedules
+      if (def.timerConfig.repeat.dayOfWeek?.length) {
+        trigger.timingTiming.repeat.dayOfWeek = def.timerConfig.repeat.dayOfWeek;
+      }
+      if (def.timerConfig.repeat.timeOfDay?.length) {
+        trigger.timingTiming.repeat.timeOfDay = def.timerConfig.repeat.timeOfDay;
+      }
+      if (def.timerConfig.repeat.dayOfMonth?.length) {
+        trigger.timingTiming.repeat.dayOfMonth = def.timerConfig.repeat.dayOfMonth;
+      }
+
+      // Add condition if one exists
+      if (def.condition) {
+        trigger.condition = {
+          language: "text/fhirpath",
+          expression: def.condition
+        };
+      }
+      return [trigger];
+    }
+
+    case 'fhirchange': {
+      // For FHIR resource changes, we specify what data we're watching
+      const trigger = {
         type: "data-changed",
         data: [{
-          type: def.fhirConfig.resourceType
-        }],
-        subscriptionTopic: "https://combinebh.org/fhir/subscription-topics/resource-change"
-      }];
+          type: def.fhirConfig.resourceType,
+          profile: [`http://hl7.org/fhir/StructureDefinition/${def.fhirConfig.resourceType}`]
+        }]
+      };
+
+      // Add condition if one exists
+      if (def.condition) {
+        trigger.condition = {
+          language: "text/fhirpath",
+          expression: def.condition
+        };
+      }
+      return [trigger];
+    }
+
+    default:
+      throw new Error(`Unsupported eventType: ${def.eventType}`);
   }
 }
     
     // Event handlers
-    function initializeCondition(type) {
-     if (!type) {
-       eventDef.condition = {
-         type: '',
-         config: null
-       };
-       return;
-     }
-    
-     eventDef.condition = {
-       type,
-       config: {...defaultConditionConfigs[type]}
-     };
-    }
+
     
     function addPayloadItem() {
   eventDef.webhookConfig.payloadItems = [
@@ -245,47 +293,45 @@
         };
       }
 
-      function generateOutputs(def) {
-  const baseOutputs = [];
-  
-  switch(def.eventType) {
-    case 'webhook':
-      return def.webhookConfig.payloadItems.map(item => ({
-        type: "derived-from",
-        label: `${item.name}${item.required ? '-req' : '-opt'}`,
-        display: item.description || `Webhook payload: ${item.name}`,
-        resource: OUTPUT_TYPES[item.type],
-        citation: item.timing // Use timing from payload item
-      }));
+function generateOutputs(def) {
+        switch(def.eventType) {
+          case 'webhook':
+            return def.webhookConfig.payloadItems.map(item => ({
+              type: "documentation",
+              label: `${item.name}${item.required ? '-req' : '-opt'}`,
+              display: item.description || `Webhook payload: ${item.name}`,
+              resource: OUTPUT_TYPES[item.type],
+              citation: `Available at ${item.timing} time`
+            }));
 
-    case 'timer':
-      return [{
-        type: "derived-from",
-        label: "timestamp-req",
-        display: "Timer Execution Time",
-        resource: "dateTime",
-        citation: "execute"
-      }];
+          case 'timer':
+            return [{
+              type: "documentation",
+              label: "timestamp-req",
+              display: "Timer Execution Time",
+              resource: OUTPUT_TYPES.dateTime,
+              citation: "Available at execution time"
+            }];
 
-    case 'fhirchange':
-      return [
-        {
-          type: "derived-from",
-          label: `${def.fhirConfig.resourceType.toLowerCase()}-req`,
-          display: `Changed ${def.fhirConfig.resourceType}`,
-          resource: def.fhirConfig.resourceType,
-          citation: "execute"
-        },
-        {
-          type: "derived-from",
-          label: "action-req",
-          display: "Change Action Type",
-          resource: "code",
-          citation: "execute"
+          case 'fhirchange':
+            return [
+              {
+                type: "documentation",
+                label: `${def.fhirConfig.resourceType.toLowerCase()}-req`,
+                display: `Changed ${def.fhirConfig.resourceType}`,
+                resource: FHIR_RESOURCES_MAP[def.fhirConfig.resourceType],
+                citation: "Available at execution time"
+              },
+              {
+                type: "documentation",
+                label: "action-req",
+                display: "Change Action Type",
+                resource: OUTPUT_TYPES.code,
+                citation: "Available at execution time"
+              }
+            ];
         }
-      ];
-  }
-}
+      }
 
 function cleanFhirObject(obj) {
   if (Array.isArray(obj)) {
@@ -418,10 +464,9 @@ $: finalEventDefinition = cleanFhirObject({
                 bind:value={item.type}
                 class="w-32 p-2 border rounded"
               >
-                <option value="string">String</option>
-                <option value="number">Number</option>
-                <option value="boolean">Boolean</option>
-                <option value="object">Object</option>
+                {#each Object.entries(OUTPUT_TYPES) as [key, url]}
+                  <option value={key}>{key}</option>
+                {/each}
               </select>
               <label class="flex items-center">
                 <input
@@ -446,43 +491,128 @@ $: finalEventDefinition = cleanFhirObject({
         </div>
    
       {:else if eventDef.eventType === 'timer'}
-        <div class="grid grid-cols-3 gap-4">
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Frequency
+      <div class="space-y-4">
+    <div>
+      <label class="block text-sm font-medium mb-1">
+        Timer Type
+      </label>
+      <select
+        bind:value={eventDef.timerConfig.type}
+        class="w-full p-2 border rounded"
+      >
+        <option value="periodic">Recurring</option>
+        <option value="datetime">One-time</option>
+      </select>
+    </div>
+
+    {#if eventDef.timerConfig.type === 'datetime'}
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Schedule Date/Time
+        </label>
+        <input
+          type="datetime-local"
+          bind:value={eventDef.timerConfig.dateTime}
+          class="w-full p-2 border rounded"
+        />
+      </div>
+
+    {:else}
+      <!-- Simple Periodic Section -->
+      <div class="grid grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Every X Units
+          </label>
+          <input
+            type="number"
+            bind:value={eventDef.timerConfig.repeat.frequency}
+            min="1"
+            class="w-full p-2 border rounded"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Period
+          </label>
+          <input
+            type="number"
+            bind:value={eventDef.timerConfig.repeat.period}
+            min="1"
+            class="w-full p-2 border rounded"
+          />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">
+            Unit
+          </label>
+          <select
+            bind:value={eventDef.timerConfig.repeat.periodUnit}
+            class="w-full p-2 border rounded"
+          >
+            {#each TIMING_UNITS as unit}
+              <option value={unit.code}>{unit.display}</option>
+            {/each}
+          </select>
+        </div>
+      </div>
+
+      <!-- Days of Week -->
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Days of Week (optional)
+        </label>
+        <div class="flex flex-wrap gap-2">
+          {#each DAYS_OF_WEEK as day}
+            <label class="flex items-center">
+              <input
+                type="checkbox"
+                bind:group={eventDef.timerConfig.repeat.dayOfWeek}
+                value={day.code}
+                class="mr-1"
+              />
+              {day.display}
             </label>
-            <input
-              type="number"
-              bind:value={eventDef.timerConfig.frequency}
-              min="1"
-              class="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Period
-            </label>
-            <input
-              type="number"
-              bind:value={eventDef.timerConfig.period}
-              min="1"
-              class="w-full p-2 border rounded"
-            />
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Unit
-            </label>
-            <select
-              bind:value={eventDef.timerConfig.periodUnit}
-              class="w-full p-2 border rounded"
-            >
-              {#each TIMING_UNITS as unit}
-                <option value={unit.code}>{unit.display}</option>
-              {/each}
-            </select>
+          {/each}
+        </div>
+      </div>
+
+      <!-- Times of Day -->
+      <div>
+        <label class="block text-sm font-medium mb-1">
+          Times of Day
+        </label>
+        <div class="flex items-center gap-2">
+          <input
+            type="time"
+            class="p-2 border rounded"
+            on:change={(e) => {
+              if (e.target.value && !eventDef.timerConfig.repeat.timeOfDay.includes(e.target.value)) {
+                eventDef.timerConfig.repeat.timeOfDay = [
+                  ...eventDef.timerConfig.repeat.timeOfDay,
+                  e.target.value
+                ];
+              }
+            }}
+          />
+          <div class="flex gap-1">
+            {#each eventDef.timerConfig.repeat.timeOfDay as time}
+              <div class="flex items-center bg-gray-100 px-2 py-1 rounded">
+                {time}
+                <button
+                  class="ml-1 text-red-500"
+                  on:click={() => {
+                    eventDef.timerConfig.repeat.timeOfDay = 
+                      eventDef.timerConfig.repeat.timeOfDay.filter(t => t !== time);
+                  }}
+                >×</button>
+              </div>
+            {/each}
           </div>
         </div>
+      </div>
+    {/if}
+  </div>
    
       {:else if eventDef.eventType === 'fhirchange'}
         <div class="space-y-4">
@@ -586,7 +716,8 @@ $: finalEventDefinition = cleanFhirObject({
           <div class="font-medium">{output.label}</div>
           <div class="text-sm text-gray-600">{output.display}</div>
           <div class="text-xs text-gray-500">
-            Type: {output.resource}, Available: {output.citation} time
+            Type: {output.resource.split('/').pop()}, 
+            {output.citation}
           </div>
         </div>
       {/each}
@@ -594,132 +725,43 @@ $: finalEventDefinition = cleanFhirObject({
   {/if}
 </section>
 
+<!--new conditions config -->
+
+<section class="mb-8 bg-white p-6 rounded-lg shadow">
+  <div class="flex justify-between items-center mb-4">
+    <h3 class="text-lg font-semibold">Event Trigger Condition</h3>
+    <button
+      class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+      on:click={() => showConditionBuilder = true}
+    >
+      Edit Condition
+    </button>
+  </div>
+
+  {#if eventDef.condition}
+    <div class="bg-gray-50 p-4 rounded">
+      <code class="text-sm">{eventDef.condition}</code>
+    </div>
+  {:else}
+    <p class="text-gray-500 italic">No condition set - event will always trigger</p>
+  {/if}
+</section>
+
+<!-- ADD - condition builder modal -->
+{#if showConditionBuilder}
+    <FhirpathConditionBuilder 
+      standalone={true}  
+      condition={eventDef.condition}
+      on:change={(e) => {
+        console.log('Received condition:', e.detail.condition);
+        eventDef.condition = e.detail.condition;
+        showConditionBuilder = false;
+      }}
+      onClose={() => showConditionBuilder = false}
+    />
+{/if}
 
 
-    <!-- Condition Configuration -->
-    <section class="mb-8 bg-white p-6 rounded-lg shadow">
-      <h3 class="text-lg font-semibold mb-4">Trigger Condition</h3>
-   
-      <div class="mb-4">
-        <label class="block text-sm font-medium mb-1">
-          Condition Type
-        </label>
-        <select
-          bind:value={eventDef.condition.type}
-          on:change={(e) => initializeCondition(e.target.value)}
-          class="w-full p-2 border rounded"
-        >
-          <option value="">No Condition</option>
-          {#each CONDITION_TYPES as type}
-            {#if type.contexts.includes(eventDef.eventType)}
-              <option value={type.code}>{type.display}</option>
-            {/if}
-          {/each}
-        </select>
-      </div>
-   
-      {#if eventDef.condition.type === 'fhirpath'}
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              FHIRPath Expression
-            </label>
-            <textarea
-              bind:value={eventDef.condition.config.expression}
-              class="w-full p-2 border rounded font-mono"
-              rows="3"
-              placeholder="Enter FHIRPath expression..."
-            ></textarea>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Description
-            </label>
-            <input
-              type="text"
-              bind:value={eventDef.condition.config.description}
-              class="w-full p-2 border rounded"
-              placeholder="Describe what this condition checks..."
-            />
-          </div>
-        </div>
-   
-      {:else if eventDef.condition.type === 'user'}
-        <div class="space-y-4">
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Required Roles
-            </label>
-            <select
-              multiple
-              bind:value={eventDef.condition.config.roles}
-              class="w-full p-2 border rounded"
-            >
-              <option value="admin">Admin</option>
-              <option value="provider">Provider</option>
-              <option value="staff">Staff</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Organizations
-            </label>
-            <select
-              multiple
-              bind:value={eventDef.condition.config.organizations}
-              class="w-full p-2 border rounded"
-            >
-              <option value="org1">Organization 1</option>
-              <option value="org2">Organization 2</option>
-            </select>
-          </div>
-        </div>
-   
-      {:else if eventDef.condition.type === 'time'}
-        <div class="space-y-4">
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label class="block text-sm font-medium mb-1">
-                Start Time
-              </label>
-              <input
-                type="time"
-                bind:value={eventDef.condition.config.startTime}
-                class="w-full p-2 border rounded"
-              />
-            </div>
-            <div>
-              <label class="block text-sm font-medium mb-1">
-                End Time
-              </label>
-              <input
-                type="time"
-                bind:value={eventDef.condition.config.endTime}
-                class="w-full p-2 border rounded"
-              />
-            </div>
-          </div>
-          <div>
-            <label class="block text-sm font-medium mb-1">
-              Days of Week
-            </label>
-            <div class="flex gap-2">
-              {#each ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as day, i}
-                <label class="flex items-center">
-                  <input
-                    type="checkbox"
-                    bind:group={eventDef.condition.config.days}
-                    value={i}
-                    class="mr-1"
-                  />
-                  {day}
-                </label>
-              {/each}
-            </div>
-          </div>
-        </div>
-      {/if}
-    </section>
    
     <!-- Preview -->
 <!-- Update preview section to show outputs -->

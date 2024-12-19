@@ -14,6 +14,13 @@
   }
 
   function processEventDefinition(resource) {
+    if (resource.extension?.some(ext => 
+    ext.url === 'http://your-system/task-event' && 
+    ext.valueBoolean === true
+  )) {
+    return null;
+  }
+
     return {
       id: resource.id,
       name: resource.name,
@@ -44,8 +51,12 @@
 
       // Process the bundle entries
       templates = bundle.entry
-        .filter(entry => entry.resource.resourceType === 'EventDefinition')
-        .map(entry => processEventDefinition(entry.resource));
+        .filter(entry => 
+          entry.resource.resourceType === 'EventDefinition' && 
+          entry.resource.status === 'draft'
+        )
+        .map(entry => processEventDefinition(entry.resource))
+        .filter(template => template !== null);
       
       console.log('EventPalette: Processed templates:', templates);
     } catch (err) {
@@ -114,7 +125,7 @@
         >
           <span class="item-title">
             {template.title || template.name || 'Untitled Event'}
-            {#if template.status !== 'active'}
+            {#if template.status !== 'draft'}
               <span class="status-badge">{template.status}</span>
             {/if}
           </span>

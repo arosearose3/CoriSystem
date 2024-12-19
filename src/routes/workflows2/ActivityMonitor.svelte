@@ -1,6 +1,6 @@
 <!-- ActivityMonitor.svelte -->
 <script>
-    import { onMount } from 'svelte';
+    import { onMount, onDestroy } from 'svelte';
     import { writable } from 'svelte/store';
     import { slide } from 'svelte/transition';
     import Activity from './ActivityLog.svelte';
@@ -8,6 +8,67 @@
     const activities = writable([]);
     let selectedActivity = null;
     let selectedActivityRef = writable(null);
+
+
+    let deletingActivity = null;
+    let deletionError = null;
+
+
+async function checkDeletionStatus(taskId) {
+    try {
+        const response = await fetch(`/api/task/${taskId}/deletion-status`);
+        if (!response.ok) throw new Error('Failed to check deletion status');
+        return await response.json();
+    } catch (error) {
+        console.error('Error checking deletion status:', error);
+        return null;
+    }
+}
+
+async function deleteActivity(activity, force = false, cascade = true) {
+    try {
+        deletingActivity = activity.id;
+        
+        // First check if we can delete
+        const status = await checkDeletionStatus(activity.id);
+        if (!status) {
+            throw new Error('Could not check deletion status');
+        }
+
+        if (!force && !status.canDelete) {
+            if (!confirm(`This task is ${status.status} and has ${status.childCount} child tasks. Force delete?`)) {
+                return;
+            }
+            force = true;
+        }
+
+        // Perform deletion
+        const response = await fetch(`/api/task/${activity.id}?force=${force}&cascade=${cascade}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            throw new Error(`Deletion failed: ${response.statusText}`);
+        }
+
+        // Remove from activities list
+        activities.update(current => 
+            current.filter(a => a.id !== activity.id)
+        );
+
+        // Clear selection if needed
+        if (selectedActivity?.id === activity.id) {
+            selectActivity(null);
+        }
+
+    } catch (error) {
+        console.error('Error deleting activity:', error);
+        deletionError = error.message;
+    } finally {
+        deletingActivity = null;
+    }
+}
+
 
     let leftPaneWidth = 300; // Initial width in pixels
     let isDragging = false;
@@ -47,15 +108,41 @@
 
     // Load all active activities
     async function loadActivities() {
-        try {
-            const response = await fetch('/api/activities/active');
-            if (!response.ok) throw new Error('Failed to load activities');
-            const data = await response.json();
-            activities.set(data);
-        } catch (error) {
-            console.error('Error loading activities:', error);
-        }
+    try {
+        // First get the activities
+        const response = await fetch('/api/task/active');
+        if (!response.ok) throw new Error('Failed to load activities');
+        const activitiesData = await response.json();
+
+        // Then get execution counts for all activities in one request
+        const countResponse = await fetch('/api/task/execution-counts', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                planIds: activitiesData.map(activity => activity.id.split('/')[1])
+            })
+        });
+
+        if (!countResponse.ok) throw new Error('Failed to load execution counts');
+        const countsData = await countResponse.json();
+
+        // Merge the counts into the activities data
+        const activitiesWithCounts = activitiesData.map(activity => {
+            const planId = activity.id.split('/')[1];
+            const matchingCount = countsData.counts.find(c => c.planId === planId);
+            return {
+                ...activity,
+                executionCount: matchingCount ? matchingCount.count : 0
+            };
+        });
+
+        activities.set(activitiesWithCounts);
+    } catch (error) {
+        console.error('Error loading activities:', error);
     }
+}
 
     function selectActivity(activity) {
         selectedActivity = activity;
@@ -96,24 +183,56 @@
 
         <div class="activity-items">
             {#each $activities as activity (activity.id)}
-                <div 
-                    class="activity-item"
-                    class:selected={selectedActivity?.id === activity.id}
+            <div 
+            class="activity-item"
+            class:selected={selectedActivity?.id === activity.id}
+            class:deleting={deletingActivity === activity.id}
+        >
+            <div class="activity-info">
+                <h3>{activity.title || activity.name}</h3>
+                <div class="activity-meta">
+                    <span class="type">{activity.kind}</span>
+                    <span class="count">
+                        {activity.executionCount || 0} executions
+                    </span>
+                    <span class="status" class:active={activity.status === 'in-progress'}>
+                        {activity.status}
+                    </span>
+                </div>
+            </div>
+            <div class="activity-actions">
+                <button 
+                    class="btn-view"
                     on:click={() => selectActivity(activity)}
                 >
-                    <div class="activity-info">
-                        <h3>{activity.title || activity.name}</h3>
-                        <div class="activity-meta">
-                            <span class="type">{activity.kind}</span>
-                            <span class="count">
-                                {activity.executionCount || 0} executions
-                            </span>
-                        </div>
-                    </div>
-                </div>
+                    View
+                </button>
+                <button 
+                    class="btn-delete"
+                    disabled={deletingActivity === activity.id}
+                    on:click={() => deleteActivity(activity)}
+                >
+                    {#if deletingActivity === activity.id}
+                        Deleting...
+                    {:else}
+                        Delete
+                    {/if}
+                </button>
+            </div>
+        </div>
             {/each}
         </div>
     </div>
+
+    {#if deletionError}
+            <div 
+                class="error-notification"
+                transition:slide
+            >
+                <p>{deletionError}</p>
+                <button on:click={() => deletionError = null}>✕</button>
+            </div>
+        {/if}
 
         <!-- Draggable Divider -->
         <div 
@@ -313,4 +432,87 @@
         font-size: 0.875rem;
         font-style: italic;
     }
+
+    /* ADD to style section */
+.activity-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.btn-view,
+.btn-delete {
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-view {
+    background: #e5e7eb;
+    color: #374151;
+    border: none;
+}
+
+.btn-view:hover {
+    background: #d1d5db;
+}
+
+.btn-delete {
+    background: #fee2e2;
+    color: #dc2626;
+    border: none;
+}
+
+.btn-delete:hover:not(:disabled) {
+    background: #fecaca;
+}
+
+.btn-delete:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.activity-item.deleting {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.status {
+    padding: 0.125rem 0.375rem;
+    background: #f3f4f6;
+    border-radius: 1rem;
+}
+
+.status.active {
+    background: #dcfce7;
+    color: #059669;
+}
+
+.error-notification {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background: #fee2e2;
+    color: #dc2626;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+}
+
+.error-notification button {
+    background: none;
+    border: none;
+    color: #dc2626;
+    cursor: pointer;
+    font-size: 1.25rem;
+}
+
+.error-notification button:hover {
+    color: #b91c1c;
+}
 </style>

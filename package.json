@@ -19,6 +19,7 @@
 	"dependencies": {
 		"@casl/ability": "^6.7.1",
 		"@google-cloud/pubsub": "^4.8.0",
+		"@google-cloud/scheduler": "^4.3.0",
 		"@tinymce/tinymce-svelte": "^3.0.0",
 		"@tinymce/tinymce-webcomponent": "^2.1.0",
 		"autoprefixer": "^10.4.20",

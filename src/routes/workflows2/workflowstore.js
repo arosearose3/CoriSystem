@@ -3,13 +3,61 @@ export const currentView = writable('tasks');
 
 
 
+function extractInputsFromDynamicValues(dynamicValues) {
+  const inputs = new Map();
+  
+  dynamicValues?.forEach(dv => {
+      if (dv.path.includes('/Task/input[')) {
+          const match = dv.path.match(/input\[(.*?)\]/);
+          if (!match) return;
+          
+          const inputName = match[1];
+          if (!inputs.has(inputName)) {
+              inputs.set(inputName, {
+                  name: inputName,
+                  type: 'standard',
+                  dataType: 'string',
+                  definedAtCreation: false
+              });
+          }
+          
+          const pathEnd = dv.path.split('/').pop();
+          const input = inputs.get(inputName);
+          
+          switch(pathEnd) {
+              case 'type':
+                  input.dataType = dv.expression.expression;
+                  break;
+              case 'definedAt':
+                  input.definedAtCreation = dv.expression.expression === 'Template Creation';
+                  break;
+              case 'value':
+                  if (input.definedAtCreation) {
+                      input.value = dv.expression.expression;
+                  }
+                  break;
+          }
+      }
+  });
+  
+  return Array.from(inputs.values());
+}
 
 function createWorkflowStore() {
-  const { subscribe, set, update } = writable({
-    nodes: [],
-    edges: [],
-    selectedNode: null
-  });
+    const { subscribe, set, update } = writable({
+      nodes: [],
+      edges: [],
+      selectedNode: null,
+      planData: {
+        name: '',
+        title: '',
+        subtitle: '',
+        description: '',
+        purpose: '',
+        usage: '',
+        author: ''
+      }
+    });
 
   return {
     subscribe,
@@ -40,41 +88,62 @@ function createWorkflowStore() {
           : node
       )
     })),
-   // Configure outputs based on node type
-// MODIFY existing addNode function:
+
+
+// workflowstore.js - REPLACE addNode function:
 addNode: (node) => update(state => {
+  // Skip nodes that belong in containers
   if (node.data.containerId) {
       return state;
   }
 
-  node.data.inputs = node.data.inputs || [{  
-    id: `${node.id}-input`,
-    name: 'input',
-    type: 'standard',
-    position: 'left'
-}];
+  // Extract inputs from dynamic values if present
+  if (node.data.dynamicValue) {
+      node.data.inputs = extractInputsFromDynamicValues(node.data.dynamicValue);
+  }
 
-  // Configure outputs based on node type
+  // Calculate base node height based on content
+  const baseHeight = 80;  // Minimum height for title and basic content
+  const inputHeight = 40; // Height needed per input
+  const inputCount = node.data.inputs?.length || 0;
+  
+  // Calculate total height needed
+  let totalHeight = baseHeight;
+  if (inputCount > 0) {
+      totalHeight += (inputCount * inputHeight);
+  }
+
+  // Special handling for event nodes
   if (node.type === 'event') {
-      // KEEP existing event node handling
-      node.data.outputs = [{
-          id: `${node.id}-event-output`,
-          type: 'standard',
-          name: 'trigger',
-          position: 'right'
-      }];
-  } else if (node.data.isResponseNode || // Check existing flag
-             // ADD check for dynamicValue configuration
-             node.data.dynamicValue?.some(dv => 
-                 dv.path === '/Task/async/type' && 
-                 dv.expression?.expression === 'approval'
-             )) {
-      // If we found a response path node, set the flag and dimensions
+      // Events start with no outputs by default
+      node.data.inputs = [];
+      node.data.outputs = [];
+      
+      // If this event has payload/output data from its configuration,
+      // add an output port for it
+      if (node.data.eventOutput) {
+          node.data.outputs = [{
+              id: `${node.id}-output`,
+              name: 'output',
+              type: 'standard',
+              position: 'right',
+              dataType: node.data.eventOutput.type
+          }];
+      }
+  }
+
+  // Handle response path nodes
+  else if (node.data.isResponseNode || 
+           node.data.dynamicValue?.some(dv => 
+               dv.path === '/Task/async/type' && 
+               dv.expression?.expression === 'approval'
+           )) {
+      // Set response node properties
       node.data.isResponseNode = true;
       node.data.width = 240;
-      node.data.height = 160;
-
-      // Get valid responses from configuration if available
+      totalHeight = Math.max(totalHeight, 160); // Ensure minimum height for response nodes
+      
+      // Parse valid responses from configuration
       let validResponses = ['approved', 'rejected'];
       if (node.data.dynamicValue) {
           const responsesConfig = node.data.dynamicValue.find(dv => 
@@ -89,6 +158,7 @@ addNode: (node) => update(state => {
           }
       }
 
+      // Configure outputs for response node
       node.data.outputs = [
           {
               id: `${node.id}-sent`,
@@ -104,18 +174,30 @@ addNode: (node) => update(state => {
               position: 'right'
           }))
       ];
-  } else {
-      // KEEP existing default output configuration
-      node.data.outputs = [
-          {
-              id: `${node.id}-output`,
-              name: 'output',
-              type: 'standard',
-              position: 'right'
-          }
-      ];
+  }
+  // Handle regular activity nodes
+  else {
+      // Ensure all inputs have IDs
+      if (node.data.inputs?.length) {
+          node.data.inputs = node.data.inputs.map(input => ({
+              ...input,
+              id: `${node.id}-${input.name}`
+          }));
+      }
+
+      // Add standard output
+      node.data.outputs = [{
+          id: `${node.id}-output`,
+          name: 'output',
+          type: 'standard',
+          position: 'right'
+      }];
   }
 
+  // Set the final calculated height
+  node.data.height = totalHeight;
+
+  // Add the node to the state
   return {
       ...state,
       nodes: [...state.nodes, node]
@@ -183,18 +265,42 @@ addNode: (node) => update(state => {
       // Find the source node and output
       const sourceNode = state.nodes.find(n => n.id === edge.source);
       const sourceOutput = sourceNode?.data.outputs?.find(o => o.id === edge.sourcePort);
-
+  
       // If this is a response connection, add response metadata
       if (sourceOutput?.type === 'response') {
-        edge.responseValue = sourceOutput.responseValue;
-        edge.isResponsePath = true;
+          edge.responseValue = sourceOutput.responseValue;
+          edge.isResponsePath = true;
+  
+          // Check if this response path already has a connection
+          const existingEdge = state.edges.find(e => 
+              e.source === edge.source && 
+              e.sourcePort === edge.sourcePort
+          );
+          
+          if (existingEdge) {
+              console.warn('Response path already connected');
+              return state;
+          }
       }
-
+  
       return {
-        ...state,
-        edges: [...state.edges, edge]
+          ...state,
+          edges: [...state.edges, edge]
       };
-    }),
+  }),
+
+    updatePlanData: (data) => update(state => ({
+      ...state,
+      planData: { ...state.planData, ...data }
+    })),
+
+    updatePlanProperties: (properties) => update(state => ({
+      ...state,
+      planProperties: { ...state.planProperties, ...properties }
+    })),
+    
+    getPlanProperties: () => get(store).planProperties,
+
     removeEdge: (edgeId) => update(state => ({
       ...state,
       edges: state.edges.filter(e => e.id !== edgeId)

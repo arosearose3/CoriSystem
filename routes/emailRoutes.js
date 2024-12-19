@@ -51,7 +51,7 @@ router.post('/create', async (req, res) => {
 router.post('/', async (req, res) => {
   const { to, subject, html } = req.body;
 
- 
+  console.log ('in api/email req.body: ', req.body);
   
   const transporter = nodemailer.createTransport({
     host: 'email7412.luxsci.com',

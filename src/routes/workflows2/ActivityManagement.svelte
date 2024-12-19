@@ -3,7 +3,7 @@
     import Plus from 'lucide-svelte/icons/plus';
     import ArrowUpDown from 'lucide-svelte/icons/arrow-up-down';
     import { onMount } from 'svelte';
-    import ActivityTemplate from './ActivityDefinitionEditor.svelte';
+    import ActivityDefinitionEditor from './ActivityDefinitionEditor.svelte';
   
     const dispatch = createEventDispatcher();
   
@@ -13,6 +13,11 @@
     let showEditor = false;
     let selectedTemplate = null;
   
+    $: {
+        console.log('State changed - showEditor:', showEditor);
+        console.log('State changed - selectedTemplate:', selectedTemplate);
+    }
+
     // Columns configuration, adding Delete column
     const columns = [
         { field: 'description', label: 'Description' },
@@ -55,10 +60,12 @@
     }
   
     function handleAddNew() {
-        selectedTemplate = null;
+        console.log('ActMgmtAdding new template');
+        selectedTemplate = {};
         showEditor = true;
-        dispatch('newTemplate');
+        console.log('After setting states - showEditor:', showEditor);
     }
+
   
     async function handleDelete(templateId) {
         if (!confirm('Are you sure you want to delete this template?')) {
@@ -89,7 +96,7 @@
     onMount(loadTemplates);
   </script>
   
-  <div class="p-4">
+  <div class="p-4 relative">
     {#if !showEditor}
         <div class="flex justify-between items-center mb-6">
             <h1 class="text-2xl font-bold">Activity Templates</h1>
@@ -123,33 +130,61 @@
                 </thead>
                 <tbody class="bg-white">
                     {#each templates as template}
-                        <tr class="hover:bg-gray-50">
-                            {#each columns as column}
-                                <td class="px-6 py-4 whitespace-nowrap border-b border-gray-200">
-                                    {#if column.field === 'delete'}
-                                        <button
-                                            class="btn btn-danger text-xs"
-                                            on:click={() => handleDelete(template.id)}
-                                        >
-                                            Delete
-                                        </button>
-                                    {:else}
-                                        {template[column.field]}
-                                    {/if}
-                                </td>
-                            {/each}
-                        </tr>
+                    <tr class="hover:bg-gray-50">
+                        {#each columns as column}
+                            <td class="px-6 py-4 whitespace-nowrap border-b border-gray-200">
+                                {#if column.field === 'delete'}
+                                    <button
+                                        class="btn btn-danger text-xs"
+                                        on:click={() => handleDelete(template.id)}
+                                    >
+                                        Delete
+                                    </button>
+                                {:else if column.field === 'description'} <!-- NEW CODE -->
+                                <span 
+                                class="activity-name cursor-pointer text-blue-500 hover:underline"
+                                on:click={() => handleTemplateClick(template)}
+                            >
+                                {template[column.field]}
+                            </span>
+                                {:else}
+                                    {template[column.field]}
+                                {/if}
+                            </td>
+                        {/each}
+                    </tr>
                     {/each}
                 </tbody>
             </table>
         </div>
-    {:else}
-        <!-- Show ActivityTemplate component instead of redirecting -->
-        <ActivityTemplate {selectedTemplate} on:cancel={handleCloseEditor} />
+    
+        {:else}
+        <div class="fixed inset-0 bg-white z-10 overflow-auto">
+            <p>Debug: Showing editor</p>
+            <ActivityDefinitionEditor 
+                selectedTemplate={selectedTemplate} 
+                on:cancel={() => {
+                    console.log('Cancel clicked');
+                    handleCloseEditor();
+                }} 
+            />
+        </div>
+        
     {/if}
-  </div>
+</div>
   
   <style>
+
+        .activity-name {
+            transition: transform 0.2s ease-in-out;
+            display: inline-block; /* Ensure transform works on inline text */
+        }
+
+        .activity-name:hover {
+            transform: scale(1.1); /* Bulge effect */
+            font-weight: bold; /* Optional: make text bold on hover */
+        }
+
     .btn-primary {
         background-color: #007bff;
         color: white;

@@ -15,21 +15,22 @@ import passport from 'passport';
 import listEndpoints from 'express-list-endpoints';
 import axios from 'axios';
 import { Strategy as FacebookStrategy } from 'passport-facebook';
-import { RouteServices } from './serverutils.js';
 import crypto from 'crypto';
 import { randomBytes } from 'crypto';
 
+// Services for Oauth login and other utils
+import { RouteServices } from './serverutils.js';
 
 // Import processors and utilities
-import { PlanLoader } from './routes/EventProcessor/PlanLoader.js';
-import { EventListener } from './routes/EventProcessor/EventListener.js';
+import { TaskManager }      from './routes/EventProcessor/TaskManager.js';
 import { PropertyResolver } from './routes/EventProcessor/PropertyResolver.js';
+import { EventManager }     from './routes/EventProcessor/EventManager.js';
+import { ActivityExecutor } from './routes/EventProcessor/ActivityExecutor.js';
+import { PlanLoader } from './routes/EventProcessor/PlanLoader.js';
 
-import { ActivityExecutor } from './routes/EventProcessor/activityExecutor.js';
-import { EventProcessor } from './routes/EventProcessor/eventProcessor2.js';
 
-import { createLogger } from './routes/EventProcessor/logger.js';
- import { createEventRoutes } from './routes/EventProcessor/eventEndpointsRoutes.js';
+ import { createLogger } from './routes/EventProcessor/logger.js';
+
 import { WebSocketManager } from './serverutils/webSocketServer.js';
 import { getFhirAccessToken } from './src/lib/auth/auth.js';
 import { 
@@ -73,6 +74,7 @@ import {
   testActivityRoutes
 } from './routes/index.js'; 
 
+import { createWorkflowRoutes } from './routes/workflowRoutes.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -113,8 +115,12 @@ logger.info('Initializing with FHIR configuration:', {
 
 // Initialize express app
 const app = express();
-let eventProcessor = null;
-let server = null;
+let taskManager = null;
+let activityExecutor = null;
+let propertyResolver = null;
+let planLoader = null;
+let eventManager = null;
+
 
 
 
@@ -180,8 +186,30 @@ async function getEpicAccessToken(code) {
   }
 }
 
+// fhirClient that wraps callFhirApi 
+const fhirClient = {
+      search(resourceType, params) {
+          const query = new URLSearchParams(params).toString();
+          const path = `/${resourceType}${query ? '?' + query : ''}`;
+          return callFhirApi('GET', path);
+        },
+
+      read(resourceType, id) {
+        return callFhirApi('GET', `/${resourceType}/${id}`);
+      },
+      create(resource) {
+        return callFhirApi('POST', `/${resource.resourceType}`, resource);
+      },
+      update(resource) {
+        return callFhirApi('PUT', `/${resource.resourceType}/${resource.id}`, resource);
+      }
+  // add more as needed
+};
+
 // FHIR API caller
 async function callFhirApi(method, path, data = null) {
+  console.log ("callFhirApi: ", method, path, data);
+
   try {
     const accessToken = await getFhirAccessToken();
     logger.debug('FHIR API call initiated:', {
@@ -239,12 +267,6 @@ async function callFhirApi(method, path, data = null) {
   }
 }
 
-// Initialize activity executor
-const activityExecutor = new ActivityExecutor(new PropertyResolver(), {
-  callFhirApi,
-  logger
-});
-
 // Configure passport
 function configurePassport() {
   passport.serializeUser((user, done) => done(null, user));
@@ -268,33 +290,6 @@ function configurePassport() {
   }));
 }
 
-// Initialize event processing
-async function initializeEventProcessing() {
-  try {
-    logger.info('Starting event processor initialization');
-    
-    // Initialize our core components
-    const planLoader = new PlanLoader();
-    const eventListener = new EventListener(app);
-    
-    // Create and initialize event processor with our components
-    eventProcessor = new EventProcessor({
-      planLoader,
-      eventListener,
-      activityExecutor,
-      callFhirApi,
-      logger
-    });
-    
-    await eventProcessor.initialize();
-    
-
-    
-  } catch (error) {
-    logger.error('Failed to initialize event processor:', error);
-    throw error;
-  }
-}
 
 // Configure express middleware
 function configureMiddleware() {
@@ -335,7 +330,7 @@ function configureMiddleware() {
   }));
   
   app.set('trust proxy', 1); // 1 means trusting the first proxy
-  app.set('trust proxy', 2); // 1 means trusting the first proxy
+  app.set('trust proxy', 2); 
 
   app.use(passport.initialize());
   app.use(passport.session());
@@ -555,10 +550,11 @@ function configureRoutes() {
     });
 });
 
-    app.use(`${BASE_PATH}/events`, 
+//OLD event endpoints, this is now managed in EventManager
+/*     app.use(`${BASE_PATH}/events`, 
       routeServices.logEventRequest.bind(routeServices),
       createEventRoutes(eventProcessor.eventListener, logger)
-    );
+    ); */
   
 
 
@@ -590,10 +586,14 @@ function configureRoutes() {
     'templates/plans': templatePlanRoutes,
     'test-activity': testActivityRoutes,
     'invite': inviteRoutes,
-    'webhook': endpointRoutes
+    'webhook': endpointRoutes,
+  
   };
   
   routeServices.setupAPIRoutes(app, apiRoutes);
+ 
+  const workflowRoutes = createWorkflowRoutes(taskManager, planLoader, activityExecutor, eventManager);
+  app.use(`${BASE_PATH}/api/workflow`, workflowRoutes);
   
   // 4. Root routes
   app.post(`${BASE_PATH}/`, (req, res) => res.status(200).send());
@@ -608,26 +608,6 @@ async function startServer(server_arg) {
   const PORT = process.env.SERVER_PORT || 3001;
 
   try {
-    // First, we'll initialize our ECA system components
-    logger.info('Beginning ECA system initialization');
-    
-    // Initialize the activity executor first since other components depend on it
-    logger.info('Initializing activity executor');
-    try {
-      await activityExecutor.initialize();
-      logger.info('Activity executor initialized successfully');
-    } catch (error) {
-      logger.error('Activity executor initialization failed', {
-        error: error.message,
-        stack: error.stack,
-        details: error.response?.data
-      });
-      throw new Error('Failed to initialize activity executor: ' + error.message);
-    }
-
-
-
-    // Now proceed with the server startup
     logger.info('Starting server initialization');
     await new Promise((resolve, reject) => {
       // Set up error handler for server startup
@@ -649,7 +629,6 @@ async function startServer(server_arg) {
 
   } catch (error) {
     logger.error('Server startup failed', {
-      phase: error.message.includes('activity executor') ? 'Activity Executor Initialization' : 'Server Startup',
       error: error.message,
       stack: error.stack
     });
@@ -674,45 +653,40 @@ async function main() {
 
     // Initialize the core ECA system components
     logger.info('Initializing ECA system components');
-    const propertyResolver = new PropertyResolver();
-    const activityExecutor = new ActivityExecutor(propertyResolver, {
-      callFhirApi,
-      logger
-    });
-    
+
+    propertyResolver = new PropertyResolver();
+    logger.info('Property Resolver initialized');
+
+    planLoader = new PlanLoader(fhirClient);
+    logger.info('Plan Loader initialized');
+
+    // ContextProvider needs to be defined.  It directs how to access context (username etc)
+    taskManager = new TaskManager(fhirClient, process.env.SYSTEM_DEVICE_ID);
+    await taskManager.initialize();
+    logger.info('Task Manager initialized');
+
+
+    activityExecutor = new ActivityExecutor(propertyResolver, fhirClient, taskManager);
+    logger.info('Activity Executor initialized');
+
+    // Now initialize the event processor with all required dependencies
+    eventManager = new EventManager(fhirClient, taskManager, planLoader, activityExecutor, app);
+     
+     await eventManager.initialize();
+     logger.info('Event Manager initialized successfully');
+
+
+
     // Initialize WebSocket manager before event processor
     // This ensures it's available for event processor initialization
     logger.info('Initializing WebSocket manager');
     const wsManager = new WebSocketManager(server, logger);  // Pass server directly
     app.locals.wsManager = wsManager;
-
-    // Now initialize the event processor with all required dependencies
-    logger.info('Initializing event processor');
-    const planLoader = new PlanLoader();
-    const eventListener = new EventListener(app);
-    
-    eventProcessor = new EventProcessor({
-      planLoader,
-      eventListener,
-      activityExecutor,
-      callFhirApi,
-      logger,
-      wsManager // Provide WebSocket manager during initialization
-    });
-
-    // Initialize the event processor
-    await eventProcessor.initialize();
-    logger.info('Event processor initialized successfully', {
-      status: {
-        plansLoaded: planLoader.getLoadedPlanCount(),
-        endpointsRegistered: eventListener.getRegisteredEndpointCount()
-      }
-    });
+    logger.info('WebSocket manager initialized');
 
  // Now configure routes
     logger.info('Configuring routes');
     configureRoutes();
-
 
     // Start the server after all components are initialized
     logger.info('Starting server');
@@ -726,7 +700,7 @@ async function main() {
           status: 'running',
           clientCount: wsManager.wss.clients.size
         },
-        eventProcessor: {
+/*         eventProcessor: {
           status: 'running',
           initialized: eventProcessor.initialized,
           activeEndpoints: Array.from(eventProcessor.eventListener.getRegisteredEndpoints())
@@ -734,7 +708,7 @@ async function main() {
         activityExecutor: {
           status: 'running',
           activeExecutions: activityExecutor.getActiveExecutions().length
-        }
+        } */
       }
     });
 
@@ -759,6 +733,23 @@ function setupShutdownHandlers() {
   async function cleanup() {
     logger.info('Initiating shutdown');
     try {
+      if (taskManager) {
+        const activeTasks = await taskManager.findInProgressTasks();
+        logger.info(`Found ${activeTasks.length} active tasks to cleanup`);
+        
+        for (const task of activeTasks) {
+            // Mark task as stopped rather than leaving it in-progress
+            await taskManager.updateTaskStatus(task.id, 'stopped', {
+                reason: 'System shutdown'
+            });
+            
+            await taskManager.createProvenance(task.id, 'system-shutdown', {
+                reason: 'Controlled shutdown',
+                timestamp: new Date().toISOString()
+            });
+        }
+      }
+
       if (eventProcessor) {
         const activeExecutions = eventProcessor.activityExecutor.getActiveExecutions();
         logger.info(`Cleaning up ${activeExecutions.length} active executions`);
@@ -792,4 +783,3 @@ function setupShutdownHandlers() {
 setupShutdownHandlers();
 main();
 
-//export { eventProcessor };

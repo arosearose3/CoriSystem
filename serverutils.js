@@ -18,6 +18,8 @@ export const healthcare = google.healthcare('v1');
 
 // Base path based on environment
 export const BASE_PATH = process.env.BASE_PATH;
+export const CLIENT_URL = process.env.CLIENT_URL;
+
 
 
 // Initialize GoogleAuth with correct scopes

@@ -14,6 +14,67 @@ import { getFhirAccessToken } from '../src/lib/auth/auth.js';
 const router = express.Router();
 const FHIR_BASE_URL = `https://healthcare.googleapis.com/v1/projects/${PROJECT_ID}/locations/${LOCATION}/datasets/${DATASET_ID}/fhirStores/${FHIR_STORE_ID}/fhir`;
 
+// planDefinitionRoutes.js - ADD new endpoint
+router.get('/complex', async (req, res) => {
+  try {
+    const accessToken = await getFhirAccessToken();
+    const url = `${FHIR_BASE_URL}/PlanDefinition?_include=*`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/fhir+json'
+      }
+    });
+
+    const bundle = await handleBlobResponse(response.data);
+    // Filter for complex plans by checking if their actions reference other PlanDefinitions
+    const complexPlans = bundle.entry?.filter(entry => {
+      const plan = entry.resource;
+      return plan.action?.some(action => 
+        action.definitionCanonical?.startsWith('PlanDefinition/')
+      );
+    }).map(entry => entry.resource) || [];
+
+    res.json(complexPlans);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to fetch complex plans',
+      details: error.message
+    });
+  }
+});
+
+// ADD new endpoint
+router.get('/basic', async (req, res) => {
+  try {
+    const accessToken = await getFhirAccessToken();
+    const url = `${FHIR_BASE_URL}/PlanDefinition?_include=*`;
+    
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/fhir+json'
+      }
+    });
+
+    const bundle = await handleBlobResponse(response.data);
+    // Filter for basic plans by checking if their actions reference ActivityDefinitions
+    const basicPlans = bundle.entry?.filter(entry => {
+      const plan = entry.resource;
+      return plan.action?.some(action => 
+        action.definitionCanonical?.includes('ActivityDefinition')
+      );
+    }).map(entry => entry.resource) || [];
+
+    res.json(basicPlans);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to fetch basic plans',
+      details: error.message
+    });
+  }
+});
 
 // Endpoint to fetch PlanDefinition and related Basic plans
 router.get('/allbasicplansplus', async (req, res) => {

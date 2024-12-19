@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte';
   import { writable } from 'svelte/store';
   import { base } from '$app/paths'; 
   import Plus from 'lucide-svelte/icons/plus';
@@ -6,6 +7,9 @@
   import OutputField from './OutputField.svelte';
   import { createEventDispatcher } from 'svelte';
   
+  export let selectedTemplate;
+  console.log('ActivityDefinitionEditor initializing with selectedTemplate:', selectedTemplate);
+
   const dispatch = createEventDispatcher();
 
   
@@ -19,36 +23,45 @@
   }
 
   const activityDefinition = writable({
-    resourceType: "ActivityDefinition",
-    description: "Send Email",
-    id: "send-email-template",
-    status: "draft",
-    kind: "Task",
-    name: "send_email",
-    title: "Send Email",
-    isResponseNode: false,
-    // New: Configuration for response endpoints
-    responseEndpoints: {
-        approved: {
-            type: "url",
-            description: "Endpoint for approval response"
-        },
-        rejected: {
-            type: "url",
-            description: "Endpoint for rejection response"
-        }
-    },
-    dynamicValue: [
-        {
+            resourceType: "ActivityDefinition",
+            description: '',
+            id: '',
+            status: 'draft',  // Default status
+            kind: 'Task',     // Default kind
+            name: '',
+            title: '',
+            dynamicValue: [{  // Default API path configuration
+                path: "/Task/apiPath",
+                expression: {
+                    language: "text/fhirpath",
+                    expression: "",
+                    name: "apiPath"
+                }
+            }]
+        });
+
+    // Populate existing values when the component mounts or when selectedTemplate changes
+    $: {
+    console.log('ActivityDefinitionEditor reactive: selectedTemplate changed:', selectedTemplate);
+    activityDefinition.set({
+        resourceType: "ActivityDefinition",
+        description: '',
+        id: '',
+        status: 'draft',
+        kind: 'Task',
+        name: '',
+        title: '',
+        dynamicValue: [{
             path: "/Task/apiPath",
             expression: {
                 language: "text/fhirpath",
-                expression: "api/email",
+                expression: "",
                 name: "apiPath"
             }
-        }
-    ]
-});
+        }],
+        ...(selectedTemplate || {})
+    });
+}
 
   const inputTypes = [
       { value: "int", label: "Integer" },
@@ -445,10 +458,8 @@ function getFormattedInputs(dynamicValues) {
 
 // Update the cleanForPreview function
 function cleanForPreview(def) {
-    const isResponsePath = def.dynamicValue?.some(dv => 
-       dv.path === '/Task/async/type' && 
-        dv.expression.expression === 'approval'
-    );
+// Use this EVERYWHERE instead of current checks:
+    const isResponsePath = def.dynamicValues?.some(dv => dv.path === '/Task/async/type');
 
     if (!isResponsePath) {
         return {
@@ -704,17 +715,18 @@ export async function handle${prefix}(req, res) {
 
 </script>
 
-<!-- Add this at the very top of the template, before the grid -->
-<div class="button-bar">
-  <div class="flex gap-4">
-      <button class="btn btn-primary" on:click={handleSave}>
+
+<div class="activity-editor">
+    <div class="button-bar">
+      <div class="flex gap-4">
+        <button class="btn btn-primary" on:click={handleSave}>
           Save Activity Definition
-      </button>
-      <button class="btn btn-secondary" on:click={() => dispatch('cancel')}>
+        </button>
+        <button class="btn btn-secondary" on:click={() => dispatch('cancel')}>
           Cancel
-      </button>
-  </div>
-</div>
+        </button>
+      </div>
+    </div>
 
 <div class="grid grid-cols-2 gap-4 p-4">
   <!-- Basic Information -->
@@ -965,10 +977,18 @@ export async function handle${prefix}(req, res) {
             <li>Update the response handling for your specific needs</li>
         </ul>
     </div>
+  </div>
 </div>
 
-
   <style>
+
+.activity-editor {
+    width: 100%;
+    height: 100%;
+    padding: 1rem;
+    background: white;
+    overflow-y: auto;
+}
 
 .checkbox {
     width: 1rem;
