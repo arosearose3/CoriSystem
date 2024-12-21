@@ -162,6 +162,9 @@ function handleResponsePathNode(node, action, workflow, planDefinition) {
         edge.source === node.id && edge.responseValue
     );
 
+    //put the ResponsePath activity into the plan first 
+    planDefinition.action.push(action);
+
     // For each response type (approved/rejected), create a condition and related action
     responseEdges.forEach(edge => {
         // Find the target node for this response
@@ -187,7 +190,7 @@ function handleResponsePathNode(node, action, workflow, planDefinition) {
         }];
 
         // Add the actions to the plan
-        planDefinition.action.push(action, responseAction);
+        planDefinition.action.push(responseAction);
     });
 }
 

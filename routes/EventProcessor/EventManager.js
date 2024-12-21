@@ -1,6 +1,8 @@
 // eventManager.js
 import { PubSub } from '@google-cloud/pubsub';
 import { CloudSchedulerClient } from '@google-cloud/scheduler';
+import { BASE_PATH } from '../../serverutils.js';
+
 
 export class EventManager {
     constructor(fhirClient, taskManager, planLoader, activityExecutor, app) {
@@ -39,6 +41,58 @@ export class EventManager {
                 }
             }
         };
+        this.app.post(`${BASE_PATH}/api/webhook/:webhookId`, this.validateWebhook.bind(this), this.handleWebhook.bind(this));
+    }
+
+    async handleWebhook(req, res) {
+        try {
+            const task = await this.processEvent(req.webhookEvent, {
+                type: 'webhook',
+                data: req.body,
+                path: req.params.webhookId
+            });
+    
+            res.status(200).json({
+                message: 'Workflow executed',
+                taskId: task.id
+            });
+        } catch (error) {
+            console.error('Webhook handling failed:', error);
+            res.status(400).json({
+                error: error.message,
+                details: error.stack
+            });
+        }
+    }
+    
+    async validateWebhook(req, res, next) {
+        const { webhookId } = req.params;
+        console.log('Webhook endpoint hit:', webhookId);
+        
+        try {
+            const cleanId = webhookId.replace(/^webhook\//, '');
+            console.log('Cleaned webhook ID:', cleanId);
+    
+            const hasWebhook = this.webhookEvents.has(cleanId) || 
+                              this.webhookEvents.has(`webhook/${cleanId}`);
+    
+            if (!hasWebhook) {
+                console.log('No registered webhook found for:', webhookId);
+                return res.status(404).json({
+                    error: 'No registered webhook found',
+                    webhook: webhookId
+                });
+            }
+    
+            req.webhookEvent = this.webhookEvents.get(cleanId);
+            next();
+        } catch (error) {
+            console.error('Error processing webhook:', error);
+            return res.status(500).json({
+                error: 'Internal server error',
+                details: error.message
+            });
+        }
     }
 
     /**
@@ -47,6 +101,8 @@ export class EventManager {
      */
     async initialize() {
         try {
+            await this.cleanupDuplicateEvents();
+
             // Load all active EventDefinitions from FHIR
             const events = await this.loadEventDefinitions();
 
@@ -80,14 +136,102 @@ export class EventManager {
         }
     }
 
+    async cleanupDuplicateEvents() {
+        try {
+            const response = await this.fhirClient.search('EventDefinition', {
+                status: 'active'
+            });
+            
+            const events = response.entry?.map(e => e.resource) || [];
+            const pathMap = new Map();
+            const toDelete = [];
+    
+            // Group events by path and identify duplicates
+            events.forEach(event => {
+                const path = event.name;
+                if (!pathMap.has(path)) {
+                    pathMap.set(path, []);
+                }
+                pathMap.get(path).push(event);
+            });
+    
+            // For each path with multiple events, mark older ones for deletion
+            for (const [path, eventList] of pathMap.entries()) {
+                if (eventList.length > 1) {
+                    // Sort by lastUpdated descending
+                    eventList.sort((a, b) => 
+                        new Date(b.meta.lastUpdated) - new Date(a.meta.lastUpdated)
+                    );
+                    
+                    // Keep the most recent, mark others for deletion
+                    const toRemove = eventList.slice(1);
+                    toDelete.push(...toRemove);
+                    
+                    console.log(`Marking ${toRemove.length} duplicate events for cleanup for path ${path}`);
+                }
+            }
+    
+            // Delete the older duplicates
+            for (const event of toDelete) {
+                try {
+                    await this.fhirClient.delete('EventDefinition', event.id);
+                    console.log(`Cleaned up duplicate EventDefinition: ${event.id}`);
+                } catch (error) {
+                    console.error(`Failed to delete duplicate EventDefinition ${event.id}:`, error);
+                }
+            }
+    
+            console.log(`Cleanup complete: removed ${toDelete.length} duplicate events`);
+            
+        } catch (error) {
+            console.error('Failed to cleanup duplicate events:', error);
+        }
+    }
     /**
      * Loads all active EventDefinitions from the FHIR store
      */
     async loadEventDefinitions() {
-        const response = await this.fhirClient.search('EventDefinition', {
-            status: 'active'
-        });
-        return response.entry?.map(e => e.resource) || [];
+        try {
+            const response = await this.fhirClient.search('EventDefinition', {
+                status: 'active'
+            });
+            
+            const events = response.entry?.map(e => e.resource) || [];
+            
+            // Create a map to track unique paths
+            const uniqueEvents = new Map();
+            
+            // Process events keeping only the most recent for each path
+            events.forEach(event => {
+                const path = event.name;
+                const currentEvent = uniqueEvents.get(path);
+                
+                // If no event for this path exists, or this one is newer
+                if (!currentEvent || 
+                    (new Date(event.meta.lastUpdated) > new Date(currentEvent.meta.lastUpdated))) {
+                    uniqueEvents.set(path, event);
+                    
+                    // If we're replacing an older event, mark it for cleanup
+                    if (currentEvent) {
+                        console.log(`Found duplicate event for path ${path}, using newer version:`, {
+                            oldId: currentEvent.id,
+                            newId: event.id,
+                            path: path
+                        });
+                    }
+                }
+            });
+            
+            // Return only the unique, most recent events
+            const uniqueEventArray = Array.from(uniqueEvents.values());
+            console.log(`Loaded ${uniqueEventArray.length} unique active events (filtered from ${events.length} total)`);
+            
+            return uniqueEventArray;
+            
+        } catch (error) {
+            console.error('Failed to load EventDefinitions:', error);
+            throw new Error(`Event loading failed: ${error.message}`);
+        }
     }
 
     /**
@@ -121,14 +265,15 @@ export class EventManager {
      * Sets up a webhook endpoint for a named event
      */
     async setupWebhookEndpoint(eventDef, trigger) {
-        const path = trigger.name;
-        const cleanPath = path.replace(/^api\//, '');
-        
-        console.log(`EventMgr: Setting up webhook endpoint for /api/${cleanPath}`);
-        
+        // 1. Normalize path - remove any leading api/
+        const cleanPath = trigger.name.replace(/^api\//, '').replace(/^webhook\//, '');
+        console.log(`EventMgr: Setting up webhook endpoint for ${BASE_PATH}/api/webhook/${cleanPath}`);
+            
+        // 2. Store in map using normalized path
         this.webhookEvents.set(cleanPath, eventDef);
     
-        this.app.post(`/api/${cleanPath}`, async (req, res) => {
+        // 3. Register the route with express using BASE_PATH and normalized path
+        this.app.post(`${BASE_PATH}/api/webhook/${cleanPath}`, async (req, res) => {
             try {
                 console.log('Webhook request received:', {
                     path: cleanPath,
@@ -136,12 +281,12 @@ export class EventManager {
                     contentType: req.headers['content-type']
                 });
         
-                if (!req.body || Object.keys(req.body).length === 0) {
+/*                 if (!req.body || Object.keys(req.body).length === 0) {
                     console.error('Empty or missing request body');
                     return res.status(400).json({
                         error: 'Valid JSON request body is required'
                     });
-                }
+                } */
     
                 console.log(`Webhook received for ${cleanPath}:`, req.body);
     
@@ -152,23 +297,23 @@ export class EventManager {
                 });
     
                 console.log('Task created:', task);
-
+    
                 res.status(200).json({
                     message: 'Workflow executed',
                     taskId: task.id
                 });
     
-                } catch (error) {
-                    console.error(`Webhook ${cleanPath} failed:`, {
-                        error: error.message,
-                        stack: error.stack
-                    });
-                    res.status(400).json({
-                        error: error.message,
-                        details: error.stack
-                    });
-                }
-            });
+            } catch (error) {
+                console.error(`Webhook ${cleanPath} failed:`, {
+                    error: error.message,
+                    stack: error.stack
+                });
+                res.status(400).json({
+                    error: error.message,
+                    details: error.stack
+                });
+            }
+        });
     }
 
     /**
@@ -319,90 +464,115 @@ async refreshTriggerMappings() {
      * Main event processing method - validates conditions and starts workflows
      */
 
-    async processEvent(eventDef, eventData) {
-        try {
-            console.log('Processing event:', {
-                eventDef: eventDef.id,
-                triggerType: eventData.type,
-                path: eventData.path,
-                data: eventData.data
-            });
-    
-            // Find matching trigger
-            const trigger = eventDef.trigger.find(t => {
-                return t.type === 'named-event' && 
-                       (t.name === `api/${eventData.path}` || 
-                        eventData.path === t.name.replace(/^api\//, ''));
-            });
-    
-            if (!trigger) {
-                throw new Error(`No matching trigger found for ${eventData.path}`);
+// REPLACE in EventManager.js
+async processEvent(eventDef, eventData) {
+    try {
+        console.log('Processing event:', {
+            eventDef: eventDef.id,
+            trigger: eventDef.trigger,
+            triggerType: eventData.type,
+            path: eventData.path,
+            data: eventData.data
+        });
+
+        // Find matching trigger
+        console.log('Searching for trigger in eventDef.trigger...');
+        const trigger = eventDef.trigger.find(t => {
+            console.log('Checking trigger:', t);
+
+            const isNamedEvent = t.type === 'named-event';
+            const matchesApiPath = t.name === `api/${eventData.path}`;
+            const matchesPathAfterReplacement = t.name.replace(/^api\/[^/]+\//, '') === eventData.path;
+
+            console.log('isNamedEvent:', isNamedEvent);
+            console.log('matchesApiPath:', matchesApiPath);
+            console.log('matchesPathAfterReplacement:', matchesPathAfterReplacement);
+
+            return isNamedEvent && (matchesApiPath || matchesPathAfterReplacement);
+        });
+
+        console.log('Found trigger:', trigger);
+
+        const triggerVariations = [
+            eventData.path,
+            `api/${eventData.path}`,
+            `webhook/${eventData.path}`
+        ];
+
+        console.log('Trigger variations to test:', triggerVariations);
+
+        let plan = null;
+        for (const triggerName of triggerVariations) {
+            console.log(`Testing trigger variation: ${triggerName}`);
+            plan = await this.planLoader.findPlanByTriggerName(triggerName);
+            if (plan) {
+                console.log(`Plan found for trigger variation: ${triggerName}`);
+                break;
             }
-    
-            // Find associated plan
-            const plan = await this.planLoader.findPlanByTriggerName(eventData.path);
-            if (!plan) {
-                throw new Error(`No plan found for trigger ${eventData.path}`);
+        }
+        
+        if (!plan) {
+            console.error('Available triggers:', eventDef.trigger.map(t => t.name));
+            throw new Error(`No plan found for trigger ${eventData.path}`);
+        }
+        
+        console.log('Loaded Plan:', JSON.stringify(plan, null, 2));
+
+        // Create parent task for this webhook execution
+        const parentTask = await this.taskManager.createWebhookTask(
+            plan,
+            trigger,
+            eventData.data || {}
+        );
+
+        console.log('Created parent task:', parentTask.id);
+
+        // Execute activities - for Basic plans, include the triggered activity
+        for (const action of plan.action || []) {
+            // Skip non-ActivityDefinition actions
+            if (!action.definitionCanonical?.includes('ActivityDefinition/')) {
+                continue;
             }
-    
-            console.log('Loaded Plan:', JSON.stringify(plan, null, 2));
-    
-            // Create parent task for this webhook execution
-            const parentTask = await this.taskManager.createWebhookTask(
-                plan,
-                trigger,
+
+            const activityId = action.definitionCanonical.split('/').pop();
+            console.log(`Creating activity task for ${activityId}`);
+
+            const activityDef = await this.fhirClient.read(
+                'ActivityDefinition',
+                activityId
+            );
+
+            console.log(`Fetched ActivityDefinition: ${activityId}`);
+            console.log('ActivityDefinition:', activityDef);
+
+            const activityTask = await this.taskManager.createActivityTask(
+                parentTask.id,
+                activityDef,
                 eventData.data || {}
             );
-    
-            console.log('Created parent task:', parentTask.id);
-    
-            // Find and execute the first real activity (skip trigger action)
-            for (const action of plan.action || []) {
-                // Skip any action that has a trigger (it's an event node)
-                if (action.trigger) continue;
-    
-                if (action.definitionCanonical?.includes('ActivityDefinition/')) {
-                    const activityId = action.definitionCanonical.split('/').pop();
-                    
-                    console.log(`Creating activity task for ${activityId}`);
-                    
-                    const activityDef = await this.fhirClient.read(
-                        'ActivityDefinition', 
-                        activityId
-                    );
-    
-                    console.log(`Fetched ActivityDefinition: ${activityId}`);
-                    console.log('ActivityDefinition:', activityDef);
-    
-                    const activityTask = await this.taskManager.createActivityTask(
-                        parentTask.id,
-                        activityDef,
-                        eventData.data || {}
-                    );
-    
-                    console.log('Created Activity Task:', activityTask.id);
-                    
-                    await this.activityExecutor.executeActivity(
-                        activityTask,
-                        {
-                            event: eventData,
-                            parent: parentTask
-                        }
-                    );
+
+            console.log('Created Activity Task:', activityTask.id);
+
+            await this.activityExecutor.executeActivity(
+                activityTask,
+                {
+                    event: eventData,
+                    parent: parentTask
                 }
-            }
-    
-            return parentTask;
-    
-        } catch (error) {
-            console.error('Event processing failed at step:', {
-                step: 'Fetching or executing activity',
-                error: error.message,
-                stack: error.stack
-            });
-            throw error;
+            );
         }
+
+        return parentTask;
+
+    } catch (error) {
+        console.error('Event processing failed at step:', {
+            step: 'Fetching or executing activity',
+            error: error.message,
+            stack: error.stack
+        });
+        throw error;
     }
+}
 
 async createWebhookTask(planDefinition, trigger, inputData = {}) {
     const task = {

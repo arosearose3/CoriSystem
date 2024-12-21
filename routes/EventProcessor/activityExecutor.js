@@ -15,8 +15,39 @@ export class ActivityExecutor {
         this.propertyResolver = propertyResolver;
         this.fhirClient = fhirClient;
         this.taskManager = taskManager;
-        // Track currently executing activities
+        this.eventManager = null; // Will be set later
         this.activeExecutions = new Map();
+    }
+
+    setEventManager(eventManager) {
+        this.eventManager = eventManager;
+    }
+
+    async registerResponseEndpoints(taskId, responseUrls) {
+        // Create temporary EventDefinitions for approve/reject paths
+        const approveEvent = {
+            resourceType: 'EventDefinition',
+            status: 'active',
+            name: `response/${taskId}/approved`,
+            trigger: [{
+                type: 'named-event',
+                name: `api/webhook/response/${taskId}/approved`
+            }]
+        };
+    
+        const rejectEvent = {
+            resourceType: 'EventDefinition',
+            status: 'active',
+            name: `response/${taskId}/rejected`,
+            trigger: [{
+                type: 'named-event',
+                name: `api/webhook/response/${taskId}/rejected`
+            }]
+        };
+    
+        // Register with EventManager
+        await this.eventManager.registerEvent(approveEvent);
+        await this.eventManager.registerEvent(rejectEvent);
     }
 
     /**
@@ -34,6 +65,24 @@ export class ActivityExecutor {
             const activityDefinition = await this.initializeActivity(activityTask);
             console.log('Activity definition loaded:', activityDefinition);
         
+
+            let responseContext = executionContext;
+            if (activityDefinition.extension?.some(ext => 
+                ext.url === 'responseType' && ext.valueString === 'approval'
+            )) {
+                const responseUrls = this.generateResponseUrls(activityTask.id);
+                await this.registerResponseEndpoints(
+                    taskId,
+                    responseUrls
+                );
+
+                responseContext = {
+                    ...executionContext,
+                    responseUrls: this.generateResponseUrls(activityTask.id)
+                };
+            }
+
+
             const resolvedValues = await this.resolveValues(
               activityDefinition, 
               executionContext
@@ -58,6 +107,16 @@ export class ActivityExecutor {
             await this.handleActivityFailure(activityTask, error);
             throw error;
         }
+    }
+
+    generateResponseUrls(taskId) {
+        // Generate a validation token (you might want to store this)
+        const validationToken = crypto.randomBytes(16).toString('hex');
+        
+        return {
+            approveUrl: `/api/webhook/response/${taskId}/approved?token=${validationToken}`,
+            rejectUrl: `/api/webhook/response/${taskId}/rejected?token=${validationToken}`
+        };
     }
 
     /**
@@ -198,25 +257,34 @@ export class ActivityExecutor {
             endTime: new Date()
         });
 
+        await this.cleanupResponseEndpoints(activityTask.id);
+
         // Clean up tracking after 5 minutes
         setTimeout(() => {
             this.activeExecutions.delete(activityTask.id);
         }, 300000);
     }
 
+    async cleanupResponseEndpoints(taskId) {
+        const approvePattern = `response/${taskId}/approved`;
+        const rejectPattern = `response/${taskId}/rejected`;
+    
+        await this.eventManager.cleanupTaskWebhooks(taskId);
+    }
+    
     async stopExecution(taskId) {
         const execution = this.activeExecutions.get(taskId);
         if (execution && execution.status === 'running') {
             console.log(`Stopping execution for task ${taskId}`);
             
             // Update execution tracking
-            execution.status = 'stopped';
+            execution.status = 'on-hold';
             execution.endTime = new Date();
             
             // Update task status
             await this.taskManager.updateTaskStatus(
                 taskId,
-                'stopped',
+                'on-hold',
                 {
                     reason: 'Execution stopped by system'
                 }
@@ -246,6 +314,8 @@ export class ActivityExecutor {
                 failureTime: new Date().toISOString()
             }
         );
+
+        await this.cleanupResponseEndpoints(activityTask.id);
     }
 
     /**

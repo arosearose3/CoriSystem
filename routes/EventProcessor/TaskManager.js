@@ -238,40 +238,50 @@ async createWebhookTask(planDefinition, trigger, inputData = {}) {
 
 
   async initializeSystemDevice() {
-    const deviceResource = {
-      resourceType: 'Device',
-      id: 'cori-workflow-engine',  // Use a fixed ID for the system device
-      status: 'active',
-      deviceName: [
-        {
-          name: 'Cori Workflow Engine',
-          type: 'user-friendly-name'
-        }
-      ],
-      type: {
-        coding: [
-          {
-            system: 'http://corisystem.org/fhir/CodeSystem/device-types',
-            code: 'workflow-engine',
-            display: 'Workflow Engine'
-          }
-        ]
-      }
-    };
-  
+    // 1. First try to find existing device by name
     try {
-      await this.fhirClient.update(deviceResource);
-    } catch (error) {
-      if (error.response?.status === 404) {
-        await this.fhirClient.create(deviceResource);
-      } else {
-        throw error;
-      }
-    }
-    
-    return deviceResource;
-  }
+        const response = await this.fhirClient.search('Device', {
+            'device-name': 'Cori Workflow Engine'
+        });
 
+        // If we found matching devices, use the first one
+        if (response.entry?.length > 0) {
+            console.log('Found existing workflow engine device:', response.entry[0].resource.id);
+            return response.entry[0].resource;
+        }
+    } catch (error) {
+        console.error('Error searching for existing device:', error);
+        // Continue to creation if search fails
+    }
+
+    // 2. If no existing device found, create our device resource
+    const deviceResource = {
+        resourceType: 'Device',
+        id: 'cori-workflow-engine',
+        status: 'active',
+        deviceName: [{
+            name: 'Cori Workflow Engine',
+            type: 'user-friendly-name'
+        }],
+        type: {
+            coding: [{
+                system: 'http://corisystem.org/fhir/CodeSystem/device-types',
+                code: 'workflow-engine',
+                display: 'Workflow Engine'
+            }]
+        }
+    };
+
+    try {
+        // Try to create the device
+        const createdDevice = await this.fhirClient.create(deviceResource);
+        console.log('Created new workflow engine device:', createdDevice.id);
+        return createdDevice;
+    } catch (error) {
+        console.error('Failed to create workflow engine device:', error);
+        throw error;
+    }
+}
  
 
   async cascadeDeleteTask(taskId, options = { force: false }) {

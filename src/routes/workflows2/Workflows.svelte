@@ -9,36 +9,61 @@
     const basicPlans = writable([]);
     const activeTasks = writable([]);
     const animatingItems = writable(new Set());
+    const expandedTasks = writable(new Set());
+
 
     // Load both Plans and Tasks
     async function loadWorkflowData() {
-        try {
-            // Fetch active tasks with children
-            const tasksResponse = await fetch(`${base}/api/workflow/task?_include=Task:partOf`);
-            if (!tasksResponse.ok) throw new Error('Failed to load tasks');
-            const allTasks = await tasksResponse.json();
+    try {
+        const tasksResponse = await fetch(`${base}/api/workflow/task?_include=Task:partOf`);
+        if (!tasksResponse.ok) throw new Error('Failed to load tasks');
+        const allTasks = await tasksResponse.json();
 
-            const topLevelTasks = allTasks.filter(task =>
-                task.instantiatesCanonical?.startsWith('PlanDefinition/')
-            );
+        // Create a Map to deduplicate top-level tasks
+        const taskMap = new Map();
 
-            const organizedTasks = topLevelTasks.map(task => ({
-                ...task,
-                childTasks: allTasks.filter(t =>
-                    t.partOf?.reference === `Task/${task.id}`
-                ).map(childTask => ({
+        // First pass - identify unique top-level tasks
+        allTasks.forEach(task => {
+            // Only process top-level tasks (no parent)
+            if (!task.partOf && task.instantiatesCanonical?.startsWith('PlanDefinition/')) {
+                const planId = task.instantiatesCanonical.split('/')[1];
+                
+                // Keep the most recent task for each plan
+                if (!taskMap.has(planId) || 
+                    new Date(task.lastModified) > new Date(taskMap.get(planId).lastModified)) {
+                    taskMap.set(planId, task);
+                }
+            }
+        });
+
+        // Organize tasks with their full history of subtasks
+        const organizedTasks = Array.from(taskMap.values()).map(task => ({
+            ...task,
+            childTasks: allTasks
+                .filter(t => t.partOf?.reference === `Task/${task.id}`)
+                .sort((a, b) => new Date(b.authoredOn) - new Date(a.authoredOn))
+                .map(childTask => ({
                     ...childTask,
-                    childTasks: allTasks.filter(t =>
-                        t.partOf?.reference === `Task/${childTask.id}`
-                    )
+                    childTasks: allTasks
+                        .filter(t => t.partOf?.reference === `Task/${childTask.id}`)
+                        .sort((a, b) => new Date(b.authoredOn) - new Date(a.authoredOn))
                 }))
-            }));
+        }));
 
-            activeTasks.set(organizedTasks);
-        } catch (error) {
-            console.error('Error loading workflow data:', error);
-        }
+        // Sort top level tasks - active ones first, then by date
+        organizedTasks.sort((a, b) => {
+            // Active tasks come first
+            if (a.status === 'active' && b.status !== 'active') return -1;
+            if (b.status === 'active' && a.status !== 'active') return 1;
+            // Then sort by date
+            return new Date(b.lastModified) - new Date(a.lastModified);
+        });
+
+        activeTasks.set(organizedTasks);
+    } catch (error) {
+        console.error('Error loading workflow data:', error);
     }
+}
 
     async function loadPlans() {
         try {
@@ -57,6 +82,52 @@
             console.error('Error loading plans:', error);
         }
     }
+
+    function toggleExpand(taskId) {
+    expandedTasks.update(set => {
+        const newSet = new Set(set);
+        if (newSet.has(taskId)) {
+            newSet.delete(taskId);
+        } else {
+            newSet.add(taskId);
+        }
+        return newSet;
+    });
+}
+
+function getTaskTitle(task) {
+    // Extract plan ID from canonical reference
+    const planId = task.instantiatesCanonical?.split('/')[1];
+    // Find matching plan
+    const plan = [...$complexPlans, ...$basicPlans].find(p => p.id === planId);
+    return plan?.title || task.instantiatesCanonical;
+}
+
+function getTaskTrigger(task) {
+    const planId = task.instantiatesCanonical?.split('/')[1];
+    const plan = [...$complexPlans, ...$basicPlans].find(p => p.id === planId);
+    return plan?.action?.[0]?.trigger?.[0]?.name || 'Unknown';
+}
+
+function getActivityName(task) {
+    const activityId = task.instantiatesCanonical?.split('/')[1];
+    return activityId || 'Unknown Activity';
+}
+
+function formatDate(dateString) {
+    return new Date(dateString).toLocaleString();
+}
+
+function getRelativeTime(startDate, currentDate) {
+    const diff = new Date(currentDate) - new Date(startDate);
+    const seconds = Math.floor(diff / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+}
 
     async function startWorkflow(plan) {
         try {
@@ -119,6 +190,16 @@
                     <div class="workflow-info">
                         <h3>{plan.title}</h3>
                         <p>{plan.description}</p>
+                        {#if plan.action?.[0]?.trigger?.[0]}
+                            <div class="trigger-info">
+                                <span class="trigger-label">Event:</span>
+                                {#if plan.action[0].trigger[0].type === 'named-event'}
+                                    <span class="trigger-webhook">{plan.action[0].trigger[0].name}</span>
+                                {:else}
+                                    <span class="trigger-other">{plan.action[0].trigger[0].type}</span>
+                                {/if}
+                            </div>
+                        {/if}
                     </div>
                     <div class="actions">
                         <button
@@ -149,6 +230,16 @@
                     <div class="workflow-info">
                         <h3>{plan.title}</h3>
                         <p>{plan.description}</p>
+                        {#if plan.action?.[0]?.trigger?.[0]}
+                            <div class="trigger-info">
+                                <span class="trigger-label">Event:</span>
+                                {#if plan.action[0].trigger[0].type === 'named-event'}
+                                    <span class="trigger-webhook">{plan.action[0].trigger[0].name}</span>
+                                {:else}
+                                    <span class="trigger-other">{plan.action[0].trigger[0].type}</span>
+                                {/if}
+                            </div>
+                        {/if}
                     </div>
                     <div class="actions">
                         <button
@@ -171,33 +262,222 @@
     </section>
 
     <!-- Active Workflows Section -->
-    <section>
-        <div class="section-header">
-            <h2>Workflow Instances</h2>
-            <button class="btn btn-refresh" on:click={loadWorkflowData}>Refresh</button>
-        </div>
+<!-- Active Workflows Section -->
+<section>
+    <div class="section-header">
+        <h2>Workflow Instances</h2>
+        <button class="btn btn-refresh" on:click={loadWorkflowData}>Refresh</button>
+    </div>
 
-        <div class="workflow-list">
-            {#each $activeTasks as task (task.id)}
-                <div class="workflow-item" class:completed={task.status === 'completed'}>
+    <div class="workflow-list">
+        {#each $activeTasks as task (task.id)}
+            <div class="task-container">
+                <div class="workflow-item" class:task-expanded={$expandedTasks?.has?.(task.id) || false}>
                     <div class="workflow-info">
-                        <h3>{task.instantiatesCanonical}</h3>
-                        <span>Status: {task.status}</span>
+                        <div class="task-header">
+                            <h3>{getTaskTitle(task)}</h3>
+                            {#if task.childTasks?.length > 0}
+                                <button 
+                                    class="expand-btn"
+                                    on:click={() => toggleExpand(task.id)}
+                                >
+                                <svg class="chevron" class:rotated={$expandedTasks?.has?.(task.id) || false} 
+                                width="20" height="20" viewBox="0 0 20 20">
+                                        <path d="M6 8l4 4 4-4" stroke="currentColor" 
+                                              fill="none" stroke-width="2" />
+                                    </svg>
+                                </button>
+                            {/if}
+                        </div>
+                        
+                        <div class="task-details">
+                            <span class="trigger-info">
+                                Trigger: {getTaskTrigger(task)}
+                            </span>
+                            <span class="status-badge" class:status-active={task.status === 'active'}
+                                  class:status-hold={task.status === 'on-hold'}>
+                                {task.status}
+                            </span>
+                            {#if task.authoredOn}
+                                <span class="timing">
+                                    Started: {formatDate(task.authoredOn)}
+                                </span>
+                            {/if}
+                        </div>
+
+                        {#if task.childTasks?.[0]}
+                            <div class="current-activity">
+                                Current: {getActivityName(task.childTasks[0])}
+                            </div>
+                        {/if}
                     </div>
-                    <button
-                        class="btn btn-stop"
-                        on:click={() => stopWorkflow(task.id)}
-                        disabled={task.status === 'completed'}
-                    >
-                        Stop
-                    </button>
+                    
+                    <div class="actions">
+                        <button
+                            class="btn btn-stop"
+                            on:click={() => stopWorkflow(task.id)}
+                            disabled={task.status === 'completed'}
+                        >
+                            Stop
+                        </button>
+                    </div>
                 </div>
-            {/each}
-        </div>
-    </section>
+
+                {#if ($expandedTasks?.has?.(task.id) || false) && task.childTasks}
+                    <div class="subtasks" transition:slide>
+                        {#each task.childTasks as childTask (childTask.id)}
+                            <div class="subtask-item">
+                                <div class="subtask-connector"></div>
+                                <div class="subtask-content">
+                                    <h4>{getActivityName(childTask)}</h4>
+                                    <div class="subtask-details">
+                                        <span class="status-badge" 
+                                              class:status-complete={childTask.status === 'completed'}
+                                              class:status-active={childTask.status === 'active'}
+                                              class:status-hold={childTask.status === 'on-hold'}>
+                                            {childTask.status}
+                                        </span>
+                                        {#if childTask.authoredOn}
+                                            <span class="timing">
+                                                {getRelativeTime(task.authoredOn, childTask.authoredOn)}
+                                            </span>
+                                        {/if}
+                                    </div>
+                                </div>
+                            </div>
+                        {/each}
+                    </div>
+                {/if}
+            </div>
+        {/each}
+    </div>
+</section>
 </div>
 
 <style>
+       .task-container {
+        margin-bottom: 1rem;
+    }
+
+    .task-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+
+    .expand-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0.25rem;
+    }
+
+    .chevron {
+        transition: transform 0.2s ease;
+    }
+
+    .chevron.rotated {
+        transform: rotate(180deg);
+    }
+
+    .task-details {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin: 0.5rem 0;
+    }
+
+    .status-badge {
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.875rem;
+        font-weight: 500;
+    }
+
+    .status-active {
+        background: #10B981;
+        color: white;
+    }
+
+    .status-hold {
+        background: #F59E0B;
+        color: white;
+    }
+
+    .status-complete {
+        background: #6B7280;
+        color: white;
+    }
+
+    .current-activity {
+        font-size: 0.875rem;
+        color: #6B7280;
+        margin-top: 0.25rem;
+    }
+
+    .subtasks {
+        margin-left: 2rem;
+        border-left: 2px solid #E5E7EB;
+        padding-left: 1rem;
+    }
+
+    .subtask-item {
+        position: relative;
+        padding: 0.5rem 0;
+    }
+
+    .subtask-connector {
+        position: absolute;
+        left: -1rem;
+        top: 50%;
+        width: 1rem;
+        height: 2px;
+        background: #E5E7EB;
+    }
+
+    .subtask-content {
+        background: #F9FAFB;
+        padding: 0.75rem;
+        border-radius: 0.375rem;
+        border: 1px solid #E5E7EB;
+    }
+
+    .subtask-details {
+        display: flex;
+        gap: 1rem;
+        align-items: center;
+        margin-top: 0.25rem;
+    }
+
+    .timing {
+        color: #6B7280;
+        font-size: 0.875rem;
+    }
+
+.trigger-info {
+        margin-top: 0.5rem;
+        font-size: 0.875rem;
+        color: #4b5563;
+    }
+
+    .trigger-label {
+        font-weight: 500;
+        margin-right: 0.5rem;
+    }
+
+    .trigger-webhook {
+        background: #dbeafe;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+        color: #1e40af;
+    }
+
+    .trigger-other {
+        background: #e5e7eb;
+        padding: 0.25rem 0.5rem;
+        border-radius: 0.25rem;
+    }
+
     .workflow-manager {
         padding: 2rem;
         display: flex;

@@ -202,8 +202,11 @@ const fhirClient = {
       },
       update(resource) {
         return callFhirApi('PUT', `/${resource.resourceType}/${resource.id}`, resource);
-      }
-  // add more as needed
+      },
+      delete(resourceType, id) {
+        return callFhirApi('DELETE', `/${resourceType}/${id}`);
+    }
+  
 };
 
 // FHIR API caller
@@ -365,9 +368,13 @@ function extractOAuthEndpoint(metadata, endpointType) {
 
 // Configure routes in correct order
 function configureRoutes() {
-  // 1. Auth routes first
+ 
+// 1 dynamic endpoints for webhook are now in EventManager 
+
+ // 2 authRoutes
   routeServices.setupAuthRoutes(app);
   
+  // 3 Epic Launch
   app.get('/epic/launch', async (req, res) => {
     const { iss, launch } = req.query;
 
@@ -444,6 +451,7 @@ function configureRoutes() {
     });
 });
 
+ // 4 Epic Callback
   app.get('/epic/callback6/', async (req, res) => {
     console.log('EPIC Callback hit with query:', req.query);
     const { code, state, error, error_description } = req.query;
@@ -550,15 +558,8 @@ function configureRoutes() {
     });
 });
 
-//OLD event endpoints, this is now managed in EventManager
-/*     app.use(`${BASE_PATH}/events`, 
-      routeServices.logEventRequest.bind(routeServices),
-      createEventRoutes(eventProcessor.eventListener, logger)
-    ); */
-  
 
-
-  // 3. API routes
+  // 4. API routes
   const apiRoutes = {
     'api211': api211Routes,
     'availability': availabilityRoutes,
@@ -592,14 +593,15 @@ function configureRoutes() {
   
   routeServices.setupAPIRoutes(app, apiRoutes);
  
+  // 5. Workflow routes
   const workflowRoutes = createWorkflowRoutes(taskManager, planLoader, activityExecutor, eventManager);
   app.use(`${BASE_PATH}/api/workflow`, workflowRoutes);
   
-  // 4. Root routes
+  // 6. Root routes
   app.post(`${BASE_PATH}/`, (req, res) => res.status(200).send());
   app.post("/", (req, res) => res.status(200).send());
   
-  // 5. SvelteKit handler (catch-all)
+  // 7. SvelteKit handler (catch-all)
   app.use(handler);
 }
 
@@ -638,93 +640,67 @@ async function startServer(server_arg) {
 
 async function main() {
   try {
-    logger.info('Starting application initialization');
+      logger.info('Starting application initialization');
 
-    // First initialize middleware and basic routes
-    // These need to be set up before any component that might need to use them
-    logger.info('Initializing middleware');
-    configureMiddleware();
-    configurePassport();
-  
+      // 1. Create server first
+      logger.info('Creating HTTPS server');
+      const server = createServer();
 
-    // Create the HTTPS server early since other components need it
-    logger.info('Creating HTTPS server');
-    const server = createServer();
+      // 2. Basic middleware setup (keep only essentials)
+    //  app.use(express.json());
+   //   app.use(cors({...}));  // Keep CORS setup
+   // these two are setup in configureMiddleware
+      
+      // 3. Initialize core ECA components early
+      logger.info('Initializing ECA system components');
+      propertyResolver = new PropertyResolver();
+      planLoader = new PlanLoader(fhirClient);
+      taskManager = new TaskManager(fhirClient, process.env.SYSTEM_DEVICE_ID);
+      await taskManager.initialize();
+      
+      // First phase - create instances without all dependencies
+      activityExecutor = new ActivityExecutor(propertyResolver, fhirClient, taskManager);
+      eventManager = new EventManager(fhirClient, taskManager, planLoader, activityExecutor, app);
+      
+      // Second phase - set up cross-references after creation
+      activityExecutor.setEventManager(eventManager);
+      
+      // Complete initialization
+      logger.info('Initializing Event Manager');
+      await eventManager.initialize();
 
-    // Initialize the core ECA system components
-    logger.info('Initializing ECA system components');
+      // 5. Now configure remaining middleware
+      logger.info('Initializing remaining middleware');
+      configureMiddleware();
+      configurePassport();
 
-    propertyResolver = new PropertyResolver();
-    logger.info('Property Resolver initialized');
+      // 6. Initialize WebSocket manager 
+      logger.info('Initializing WebSocket manager');
+      const wsManager = new WebSocketManager(server, logger);
+      app.locals.wsManager = wsManager;
 
-    planLoader = new PlanLoader(fhirClient);
-    logger.info('Plan Loader initialized');
+      // 7. Configure routes AFTER event manager
+      logger.info('Configuring routes');
+      configureRoutes();
 
-    // ContextProvider needs to be defined.  It directs how to access context (username etc)
-    taskManager = new TaskManager(fhirClient, process.env.SYSTEM_DEVICE_ID);
-    await taskManager.initialize();
-    logger.info('Task Manager initialized');
+      // 8. Start server
+      logger.info('Starting server');
+      await startServer(server);
 
-
-    activityExecutor = new ActivityExecutor(propertyResolver, fhirClient, taskManager);
-    logger.info('Activity Executor initialized');
-
-    // Now initialize the event processor with all required dependencies
-    eventManager = new EventManager(fhirClient, taskManager, planLoader, activityExecutor, app);
-     
-     await eventManager.initialize();
-     logger.info('Event Manager initialized successfully');
-
-
-
-    // Initialize WebSocket manager before event processor
-    // This ensures it's available for event processor initialization
-    logger.info('Initializing WebSocket manager');
-    const wsManager = new WebSocketManager(server, logger);  // Pass server directly
-    app.locals.wsManager = wsManager;
-    logger.info('WebSocket manager initialized');
-
- // Now configure routes
-    logger.info('Configuring routes');
-    configureRoutes();
-
-    // Start the server after all components are initialized
-    logger.info('Starting server');
-    await startServer(server);
-
-    // Log successful startup with component status
-    logger.info('Application started successfully', {
-      components: {
-        server: 'running',
-        websocket: {
-          status: 'running',
-          clientCount: wsManager.wss.clients.size
-        },
-/*         eventProcessor: {
-          status: 'running',
-          initialized: eventProcessor.initialized,
-          activeEndpoints: Array.from(eventProcessor.eventListener.getRegisteredEndpoints())
-        },
-        activityExecutor: {
-          status: 'running',
-          activeExecutions: activityExecutor.getActiveExecutions().length
-        } */
-      }
-    });
+      logger.info('Application started successfully');
 
   } catch (error) {
-    // Enhanced error logging with component context
-    logger.error('Application failed to start', {
-      error: {
-        message: error.message,
-        stack: error.stack,
-        component: error.message.includes('WebSocket') ? 'WebSocket Manager' :
+      logger.error('Application failed to start', {
+          error: {
+              message: error.message,
+              stack: error.stack,
+              component: error.message.includes('WebSocket') ? 'WebSocket Manager' :
                   error.message.includes('event processor') ? 'Event Processor' :
                   error.message.includes('server') ? 'Server' :
                   'Unknown Component'
-      }
-    });
-    process.exit(1);
+          }
+      });
+      process.exit(1);
   }
 }
 
@@ -739,7 +715,7 @@ function setupShutdownHandlers() {
         
         for (const task of activeTasks) {
             // Mark task as stopped rather than leaving it in-progress
-            await taskManager.updateTaskStatus(task.id, 'stopped', {
+            await taskManager.updateTaskStatus(task.id, 'on-hold', {
                 reason: 'System shutdown'
             });
             

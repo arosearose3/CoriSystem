@@ -140,21 +140,26 @@ export class PlanLoader {
     findPlanByTriggerName(triggerName) {
         console.log('Looking for plan with trigger:', triggerName);
         console.log('Available triggers:', Array.from(this.triggerToPlan.keys()));
-        
-        // Try several path variations
-        const variations = [
+    
+        // Generate variations of triggerName
+        const variations = new Set([
             triggerName,
             `api/${triggerName}`,
-            triggerName.replace(/^api\//, '')
-        ];
+            triggerName.replace(/^api\//, ''),
+        ]);
     
-        for (const variation of variations) {
-            const plan = this.triggerToPlan.get(variation);
-            if (plan) {
-                return plan;
+        console.log('Trigger variations to test:', Array.from(variations));
+    
+        // Check for matching plan
+        for (const key of this.triggerToPlan.keys()) {
+            if (variations.has(key)) {
+                console.log('Matched variation:', key);
+                return this.triggerToPlan.get(key);
             }
         }
     
+        console.log('No matching plan found.');
         return null;
     }
+    
 }

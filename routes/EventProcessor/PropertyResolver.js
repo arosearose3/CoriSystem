@@ -141,122 +141,89 @@ export class PropertyResolver {
    * working with FHIR resources where we need to filter arrays, navigate complex
    * structures, or apply conditions to find the right value.
    */
-async resolveActivityInputs(activityDefinition, executionContext) {
-  const validationResult = new ValidationResult();
-    const resolvedValues = {
-        inputs: {},
-        endpoint: null,
-        configuration: {}
-    };
-
-    try {
+      async resolveActivityInputs(activityDefinition, executionContext) {
+        const validationResult = new ValidationResult();
+        const resolvedValues = {
+            inputs: {},
+            endpoint: null,
+            configuration: {}
+        };
+    
+        try {
             const endpointValue = activityDefinition.dynamicValue?.find(
-              dv => dv.path === '/Task/apiPath'
-          );
-
-          if (endpointValue) {
-              try {
-                  resolvedValues.endpoint = await this.resolveEndpoint(endpointValue, executionContext);
-              } catch (error) {
-                  validationResult.addError('endpoint', `Invalid endpoint: ${error.message}`);
-              }
-          }
-        // First pass: Validate all expressions and collect required properties
-        const requiredProperties = new Set();
-        
-        for (const dynamicValue of activityDefinition.dynamicValue || []) {
-            // Check if property is required
-            if (this.isPropertyRequired(dynamicValue)) {
+                dv => dv.path === '/Task/apiPath'
+            );
+    
+            if (endpointValue) {
+                try {
+                    resolvedValues.endpoint = await this.resolveEndpoint(endpointValue, executionContext);
+                } catch (error) {
+                    validationResult.addError('endpoint', `Invalid endpoint: ${error.message}`);
+                }
+            }
+    
+            // Check if this is a response path activity
+            const isResponsePath = activityDefinition.extension?.some(ext => 
+                ext.url === 'responseType' && ext.valueString === 'approval'
+            );
+    
+            // For response path activities, add response URLs to inputs
+            if (isResponsePath && executionContext.responseUrls) {
+                resolvedValues.inputs.responseUrls = executionContext.responseUrls;
+            }
+    
+            for (const dynamicValue of activityDefinition.dynamicValue || []) {
                 const pathResult = this.parseDynamicValuePath(dynamicValue.path);
-                if (pathResult?.property) {
-                    requiredProperties.add(pathResult.property);
+                if (!pathResult) {
+                    validationResult.addError(dynamicValue.path, 'Invalid path structure');
+                    continue;
                 }
-            }
-
-            // Validate expression
-            if (dynamicValue.expression) {
-                const expressionError = await this.validateExpression(
-                    dynamicValue.expression.expression,
-                    dynamicValue.expression.language,
-                    executionContext
-                );
-                
-                if (expressionError) {
-                    validationResult.addInvalidExpression(
-                        dynamicValue.path,
-                        dynamicValue.expression.expression,
-                        expressionError
+    
+                try {
+                    const resolvedValue = await this.resolveDynamicValue(
+                        dynamicValue,
+                        pathResult.type,
+                        executionContext
                     );
+                    
+                    // Store the resolved value
+                    this.storeResolvedValue(
+                        resolvedValues, 
+                        pathResult.type, 
+                        pathResult.property, 
+                        resolvedValue,
+                        pathResult.attribute
+                    );
+                } catch (error) {
+                    validationResult.addError(dynamicValue.path, error.message);
                 }
             }
-        }
-
-        // second pass - resolve values and validate
-        console.log("Resolving values for activity:", activityDefinition.id);
-
-        for (const dynamicValue of activityDefinition.dynamicValue || []) {
-            console.log("Processing dynamic value:", dynamicValue);
-
-            // Extract path components
-            const pathResult = this.parseDynamicValuePath(dynamicValue.path);
-            if (!pathResult) {
-              validationResult.addError(dynamicValue.path, 'Invalid path structure');
-              continue;
-          }
-
-          try {
-            const resolvedValue = await this.resolveDynamicValue(
-                dynamicValue,
-                pathResult.type,
-                executionContext
-            );
-         
-            // Track resolved required properties
-            if (requiredProperties.has(pathResult.property) && !resolvedValue) {
-                validationResult.addMissingRequired(pathResult.property);
+    
+            // Validate results
+            this.validateCrossPropertyConstraints(resolvedValues, validationResult);
+    
+            if (validationResult.hasIssues()) {
+                throw new Error('Property resolution failed validation', { 
+                    cause: validationResult 
+                });
             }
-         
-            // Pass the attribute from pathResult if it exists
-            this.storeResolvedValue(
-                resolvedValues, 
-                pathResult.type, 
-                pathResult.property, 
-                resolvedValue,
-                pathResult.attribute // From our updated parseDynamicValuePath
-            );
-         
-         } catch (error) {
-            validationResult.addError(dynamicValue.path, error.message);
-         }
+    
+            console.log('Final resolved values:', {
+                endpoint: resolvedValues.endpoint,
+                inputs: resolvedValues.inputs,
+                configuration: resolvedValues.configuration
+            });
+            
+            return resolvedValues;
+    
+        } catch (error) {
+            if (error.cause instanceof ValidationResult) {
+                throw error;
+            }
+            validationResult.addError('system', `Unexpected error: ${error.message}`);
+            throw new Error('Property resolution failed', { cause: validationResult });
         }
-        // Cross-property validation
-        this.validateCrossPropertyConstraints(resolvedValues, validationResult);
-
-        // If there are critical issues, throw error
-        if (validationResult.hasIssues()) {
-            throw new Error('Property resolution failed validation', { cause: validationResult });
-        }
-
-        if (!resolvedValues.endpoint) {
-            validationResult.addError('endpoint', 'No valid endpoint specified for activity');
-        }
-        console.log('Final resolved values:', {
-          endpoint: resolvedValues.endpoint,
-          inputs: resolvedValues.inputs,
-          configuration: resolvedValues.configuration
-        });
-      
-        return resolvedValues;
-
-    } catch (error) {
-        if (error.cause instanceof ValidationResult) {
-            throw error; // Rethrow validation errors
-        }
-        // Handle unexpected errors
-        validationResult.addError('system', `Unexpected error: ${error.message}`);
-        throw new Error('Property resolution failed', { cause: validationResult });
     }
-  }
 
   parseDynamicValuePath(path) {
     console.log("Parsing path:", path);
